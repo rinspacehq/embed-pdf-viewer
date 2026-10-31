@@ -35,7 +35,7 @@ export function RinPanel({ documentId }: { documentId: string }) {
         </details> : <span />}
         <div className="flex gap-2">
           {(record.running || record.recoverable) && <button className="rounded border px-3 py-1" type="button" onClick={() => { void capability.stop(documentId); }}>停止</button>}
-          {!record.running && <button className="rounded border px-3 py-1" disabled={session.status === 'loading' || !record.draft.trim()} type="submit">{session.status === 'anonymous' ? '登录' : '发送'}</button>}
+          {!record.running && <button className="rounded border px-3 py-1" disabled={!capability.ready(documentId) || session.status === 'loading' || !record.draft.trim()} type="submit">{session.status === 'anonymous' ? '登录' : '发送'}</button>}
         </div>
       </div>
     </form>
