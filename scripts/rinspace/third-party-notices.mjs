@@ -15,4 +15,4 @@ for (const path of [...new Set(paths)].sort()) {
   for (const name of names) output += `### ${name}\n\n${await readFile(resolve(path, name), 'utf8')}\n\n`;
 }
 for (const name of bundled) if (!found.has(name)) throw new Error(`Bundled license missing: ${name}`);
-await writeFile(resolve(root, 'THIRD-PARTY-NOTICES.md'), output);
+await writeFile(resolve(root, 'THIRD-PARTY-NOTICES.md'), output.trimEnd() + '\n');
