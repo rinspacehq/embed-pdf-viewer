@@ -10,14 +10,16 @@ const output = process.env.READER_EVIDENCE_DIR;
 if (!output) throw new Error('Set READER_EVIDENCE_DIR to an external evidence directory');
 await mkdir(output, { recursive: true });
 
-function samplePdf() {
+function samplePdf(imageOnly = false) {
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [3 0 R 5 0 R 7 0 R] /Count 3 >>',
   ];
   for (let page = 1; page <= 3; page++) {
     objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 9 0 R >> >> /Contents ${page * 2 + 2} 0 R >>`);
-    const stream = `BT /F1 20 Tf 50 720 Td (Reader test page ${page}) Tj 0 -40 Td (Markdown headings use a hash sign.) Tj ET`;
+    const stream = imageOnly
+      ? 'q 500 0 0 650 50 50 cm BI /W 1 /H 1 /CS /RGB /BPC 8 /F /AHx ID e6e6e6> EI Q'
+      : `BT /F1 20 Tf 50 720 Td (Reader test page ${page}) Tj 0 -40 Td (Markdown headings use a hash sign.) Tj ET`;
     objects.push(`<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`);
   }
   objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
@@ -41,6 +43,7 @@ const server = createServer(async (request, response) => {
     return;
   }
   if (pathname === '/fixture.pdf') { response.setHeader('Content-Type', 'application/pdf'); response.end(pdf); return; }
+  if (pathname === '/scanned.pdf') { response.setHeader('Content-Type', 'application/pdf'); response.end(samplePdf(true)); return; }
   const file = resolve(root, '.' + pathname);
   if (!file.startsWith(root + sep)) { response.writeHead(403).end(); return; }
   try {
@@ -143,9 +146,28 @@ try {
     await manager.closeDocument(id).toPromise(); handle.destroy(); return count;
   });
   assert.equal(closed, 1);
+  const scanned = await page.evaluate(async () => {
+    const { initReader } = await import('/embedpdf.js');
+    const host = { session: () => ({ status: 'anonymous' }), subscribeSession: () => () => {}, login: async () => {}, restore: () => undefined, save: () => {}, send: async () => { throw Error('Unexpected model invocation'); }, stop: async () => {} };
+    const id = crypto.randomUUID();
+    let resolveReady;
+    const ready = new Promise(resolve => { resolveReady = resolve; });
+    const handle = await initReader({ target: document.getElementById('viewer'), documentId: id, title: 'scanned.pdf',
+      buffer: await (await fetch('/scanned.pdf')).arrayBuffer(), wasmUrl: new URL('/pdfium.wasm', location.href).href,
+      host, onOpenFile: () => {}, onClose: () => {}, onReady: () => resolveReady(), onViewChange: () => {} });
+    await ready;
+    const registry = await document.querySelector('embedpdf-container').registry;
+    const tools = registry.getPlugin('rin').provides().tools(id);
+    const reads = [];
+    for (let index = 0; index < 5; index++) reads.push(await tools.readPages([1, 2, 3]));
+    const search = await tools.search('Markdown', [1, 2, 3]);
+    handle.destroy(); return { reads, search };
+  });
+  assert(scanned.reads.flat().every(item => item.text === ''));
+  assert.deepEqual(scanned.search, []);
   assert.deepEqual(errors, []);
   await writeFile(resolve(output, 'result.json'), JSON.stringify({ pdfPages: 3, sends: 1, textExtracted: true,
-    collapsePreservesDraftAndRun: true, unreadCitationRejected: true, mobileClose: true, pageErrors: errors }, null, 2));
+    collapsePreservesDraftAndRun: true, unreadCitationRejected: true, mobileClose: true, scannedPagesEmpty: true, pageErrors: errors }, null, 2));
   console.log('Native viewer PDF/plugin browser smoke passed.');
 } finally {
   await page.screenshot({ path: resolve(output, 'last-state.png') }).catch(() => {});

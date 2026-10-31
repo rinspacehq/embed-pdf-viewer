@@ -81,7 +81,11 @@ export class RinPlugin extends BasePlugin<RinPluginConfig, RinCapability> {
       let remaining = MAX_TEXT;
       for (const page of unique) {
         document();
-        const text = await this.engine.extractText(doc, [page - 1]).toPromise();
+        // v2's extractText reads an uninitialised UTF-16 buffer for zero-character
+        // pages. Image-only pages must never send that memory as PDF content.
+        const rectangles = await this.engine.getPageTextRects(doc, doc.pages[page - 1]).toPromise();
+        document();
+        const text = rectangles.length ? await this.engine.extractText(doc, [page - 1]).toPromise() : '';
         document();
         results.push({ page, text: text.slice(0, remaining) });
         readPages.add(page);
