@@ -130,6 +130,10 @@ import { RubberStampSidebar } from '@/components/rubber-stamp-sidebar';
 import { SignatureSidebar } from '@/components/signature-sidebar';
 import { SignatureCreateModal } from '@/components/signature-create-modal';
 import { SnippetConfigProvider } from '@/components/snippet-config-context';
+import { RinPluginPackage } from '@/plugins/rin/plugin';
+import { RinPanel } from '@/plugins/rin/panel';
+import { rinCommand, withRinUI } from '@/plugins/rin/ui';
+import type { RinPluginConfig } from '@/plugins/rin/types';
 import { SchemaSelectionMenu } from '@/ui/schema-selection-menu';
 import { SchemaOverlay } from '@/ui/schema-overlay';
 import { PrintModal } from '@/components/print-modal';
@@ -222,6 +226,8 @@ export interface SnippetFontsConfig {
 }
 
 export interface PDFViewerConfig {
+  /** Optional Rin assistant. The application supplies identity and transport. */
+  rin?: RinPluginConfig;
   // === Document Source (optional) ===
   /** URL or path to the PDF document. If not provided, viewer loads with no document. */
   src?: string;
@@ -599,6 +605,7 @@ export function PDFViewer({ config, onRegistryReady }: PDFViewerProps) {
       'mode-select-button': ModeSelectButton,
       'view-permissions-modal': ViewPermissionsModal,
       'redaction-sidebar': RedactionSidebar,
+      'rin-panel': RinPanel,
     }),
     [],
   );
@@ -660,6 +667,7 @@ export function PDFViewer({ config, onRegistryReady }: PDFViewerProps) {
             // Use root disabledCategories as default, but allow plugin-specific override
             ...(config.disabledCategories && { disabledCategories: config.disabledCategories }),
             ...config.commands,
+            commands: { ...defaultCommands, ...config.commands?.commands, ...(config.rin ? { 'rin:toggle': rinCommand } : {}) },
           }),
           createPluginRegistration(I18nPluginPackage, { ...DEFAULTS.i18n, ...config.i18n }),
           createPluginRegistration(UIPluginPackage, {
@@ -667,6 +675,7 @@ export function PDFViewer({ config, onRegistryReady }: PDFViewerProps) {
             // Use root disabledCategories as default, but allow plugin-specific override
             ...(config.disabledCategories && { disabledCategories: config.disabledCategories }),
             ...config.ui,
+            ...(config.rin ? { schema: withRinUI(config.ui?.schema || defaultUISchema) } : {}),
           }),
 
           // Viewport & Navigation
@@ -727,6 +736,7 @@ export function PDFViewer({ config, onRegistryReady }: PDFViewerProps) {
           }),
 
           // Infrastructure
+          ...(config.rin ? [createPluginRegistration(RinPluginPackage, config.rin)] : []),
           createPluginRegistration(HistoryPluginPackage, {
             ...DEFAULTS.history,
             ...config.history,

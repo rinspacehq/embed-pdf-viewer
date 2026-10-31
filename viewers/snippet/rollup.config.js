@@ -45,18 +45,24 @@ export default [
       sourcemap: false,
     },
     plugins: [
+      {
+        name: 'rinspace-bundled-dependencies',
+        generateBundle() {
+          const names = [...new Set([...this.getModuleIds()].flatMap(id => {
+            const match = id.match(/node_modules\/((?:@[^/]+\/)?[^/]+)/);
+            return match ? [match[1]] : [];
+          }))].sort();
+          this.emitFile({ type: 'asset', fileName: 'bundled-dependencies.json', source: JSON.stringify(names, null, 2) });
+        },
+      },
       copy({
         targets: [
           {
-            src: 'src/index.html',
+            src: 'src/reader-example.html',
             dest: 'dist',
           },
           {
             src: 'node_modules/@embedpdf/pdfium/dist/*.wasm',
-            dest: 'dist',
-          },
-          {
-            src: 'demo-pdf/*.pdf',
             dest: 'dist',
           },
         ],
@@ -115,6 +121,7 @@ export default [
           },
         }),
       terser({
+        maxWorkers: 1,
         module: true,
         compress: isDev ? false : true,
       }),

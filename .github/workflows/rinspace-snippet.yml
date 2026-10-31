@@ -1,0 +1,60 @@
+name: Rinspace snippet
+on:
+  pull_request:
+    branches: [rinspace-v2]
+  push:
+    branches: [rinspace-v2]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rinspace-snippet-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  snippet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+          cache-dependency-path: viewers/snippet/package-lock.json
+      - name: Install only the viewer
+        working-directory: viewers/snippet
+        run: npm ci --ignore-scripts --workspaces=false
+      - name: Build and verify license coverage
+        working-directory: viewers/snippet
+        run: |
+          npm run build
+          node ../../scripts/rinspace/third-party-notices.mjs
+          git diff --exit-code -- THIRD-PARTY-NOTICES.md
+          npx playwright install --with-deps chromium
+      - name: Native PDF and plugin browser checks
+        env:
+          PLAYWRIGHT_MODULE: ${{ github.workspace }}/viewers/snippet/node_modules/playwright/index.mjs
+          READER_EVIDENCE_DIR: ${{ runner.temp }}/reader-evidence
+        run: node scripts/rinspace/browser-smoke.mjs
+      - name: Pack the tested viewer
+        working-directory: viewers/snippet
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/reader-package"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/reader-package"
+          node ../../scripts/rinspace/artifact-manifest.mjs "$RUNNER_TEMP/reader-package"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rinspace-snippet-${{ github.sha }}
+          path: ${{ runner.temp }}/reader-package
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reader-browser-${{ github.sha }}
+          path: ${{ runner.temp }}/reader-evidence
+          retention-days: 7
