@@ -129,6 +129,20 @@ try {
   await page.evaluate(() => window.changeReaderAccount({ status: 'authenticated', accountId: 'new-reader' }));
   assert.equal(await input.inputValue(), 'Keep this draft when I log in.');
   assert.equal(await page.evaluate(() => window.sendCount), 1);
+  // Native password-cancel/error-close also closes the host route, not an unbound viewer.
+  const closed = await page.evaluate(async () => {
+    window.viewer.remove();
+    const { initReader } = await import('/embedpdf.js');
+    let count = 0;
+    const host = { session: () => ({ status: 'anonymous' }), subscribeSession: () => () => {}, login: async () => {}, restore: () => undefined, save: () => {}, send: async () => ({ text: '' }), stop: async () => {} };
+    const id = crypto.randomUUID();
+    const handle = await initReader({ target: document.getElementById('viewer'), documentId: id, title: 'close.pdf',
+      buffer: await (await fetch('/fixture.pdf')).arrayBuffer(), wasmUrl: new URL('/pdfium.wasm', location.href).href,
+      host, onOpenFile: () => {}, onClose: () => { count++; }, onReady: () => {}, onViewChange: () => {} });
+    const manager = (await document.querySelector('embedpdf-container').registry).getPlugin('document-manager').provides();
+    await manager.closeDocument(id).toPromise(); handle.destroy(); return count;
+  });
+  assert.equal(closed, 1);
   assert.deepEqual(errors, []);
   await writeFile(resolve(output, 'result.json'), JSON.stringify({ pdfPages: 3, sends: 1, textExtracted: true,
     collapsePreservesDraftAndRun: true, unreadCitationRejected: true, mobileClose: true, pageErrors: errors }, null, 2));

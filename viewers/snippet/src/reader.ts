@@ -77,7 +77,8 @@ export async function initReader(options: ReaderOptions): Promise<ReaderHandle> 
       } else zoom.requestZoom(ZoomMode.FitPage);
       restoreAfterLayout();
       options.onReady(pageCount);
-    }), scroll.onScroll(sample), zoom.onZoomChange(sample),
+    }), manager.onDocumentClosed(closedId => { if (closedId === id && !destroyed) options.onClose(); }),
+      scroll.onScroll(sample), zoom.onZoomChange(sample),
       registry.getPlugin<ViewportPlugin>('viewport')!.provides().onViewportResize(event => { if (event.documentId === id) restoreAfterLayout(); })];
     cleanup = () => { destroyed = true; clearTimeout(resizeTimer); window.removeEventListener('resize', restoreAfterLayout);
       viewer.removeEventListener('wheel', userScroll, true); viewer.removeEventListener('touchmove', userScroll, true);
