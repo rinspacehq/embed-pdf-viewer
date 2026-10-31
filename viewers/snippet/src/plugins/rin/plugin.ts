@@ -16,6 +16,21 @@ export class RinPlugin extends BasePlugin<RinPluginConfig, RinCapability> {
   private pending = new Map<string, AbortController>();
   private listeners = new Set<() => void>();
   private unsubscribe?: () => void;
+  private readinessKey = "";
+
+  private isDocumentReady(documentId: string) {
+    const state = this.coreState.core;
+    const doc = state.documents[documentId];
+    return state.activeDocumentId === documentId && doc?.status === 'loaded' && Boolean(doc.document?.pages.length);
+  }
+
+  protected onCoreStoreUpdated() {
+    const id = this.coreState.core.activeDocumentId;
+    const key = `${id}:${id ? this.isDocumentReady(id) : false}`;
+    if (key !== this.readinessKey) { this.readinessKey = key; this.notify(); }
+  }
+
+  protected onDocumentLoadingStarted(id: string) { this.pending.get(id)?.abort(); }
 
   constructor(id: string, registry: PluginRegistry) { super(id, registry); }
 
@@ -66,9 +81,10 @@ export class RinPlugin extends BasePlugin<RinPluginConfig, RinCapability> {
     const document = () => {
       const state = this.coreState.core;
       const doc = state.documents[documentId]?.document;
-      if (!doc || state.activeDocumentId !== documentId || signal?.aborted) {
+      if (!state.documents[documentId] || state.activeDocumentId !== documentId || signal?.aborted) {
         throw new Error('当前 PDF 已切换，请重新发送。');
       }
+      if (!doc || !this.isDocumentReady(documentId)) throw new Error('PDF 尚未准备好，请稍后重试。');
       return doc;
     };
     const read = async (pages: number[]) => {
@@ -126,6 +142,7 @@ export class RinPlugin extends BasePlugin<RinPluginConfig, RinCapability> {
   protected buildCapability(): RinCapability {
     return {
       session: () => this.host.session(),
+      ready: id => this.isDocumentReady(id),
       login: () => this.host.login(),
       snapshot: id => this.snapshot(id),
       subscribe: listener => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; },
@@ -135,6 +152,7 @@ export class RinPlugin extends BasePlugin<RinPluginConfig, RinCapability> {
         const session = this.host.session();
         const record = this.snapshot(id);
         if (record.running || !record.draft.trim()) return;
+        if (!this.isDocumentReady(id)) { this.update(id, { error: 'PDF 尚未准备好，请稍后重试。' }); return; }
         if (session.status !== 'authenticated') {
           try { await this.host.login(); }
           catch (error) { this.update(id, { error: error instanceof Error ? error.message : '请先登录。' }); }

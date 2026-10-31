@@ -1,6 +1,6 @@
 {
   "name": "@rinspacehq/embedpdf-snippet",
-  "version": "2.15.1-rinspace.3",
+  "version": "2.15.1-rinspace.4",
   "main": "dist/embedpdf.js",
   "types": "dist/embedpdf.d.ts",
   "license": "MIT",

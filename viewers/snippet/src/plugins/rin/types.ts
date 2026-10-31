@@ -42,6 +42,7 @@ export interface RinHost {
 export interface RinPluginConfig { host: RinHost }
 
 export interface RinCapability {
+  ready(documentId: string): boolean;
   session(): RinSession;
   login(): Promise<void>;
   snapshot(documentId: string): RinSnapshot;

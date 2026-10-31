@@ -43,6 +43,7 @@ const server = createServer(async (request, response) => {
     return;
   }
   if (pathname === '/fixture.pdf') { response.setHeader('Content-Type', 'application/pdf'); response.end(pdf); return; }
+  if (pathname === '/slow.pdf') { await new Promise(resolve => setTimeout(resolve, 4000)); response.setHeader('Content-Type', 'application/pdf'); response.end(pdf); return; }
   if (pathname === '/scanned.pdf') { response.setHeader('Content-Type', 'application/pdf'); response.end(samplePdf(true)); return; }
   const file = resolve(root, '.' + pathname);
   if (!file.startsWith(root + sep)) { response.writeHead(403).end(); return; }
@@ -132,6 +133,26 @@ try {
   await page.evaluate(() => window.changeReaderAccount({ status: 'authenticated', accountId: 'new-reader' }));
   assert.equal(await input.inputValue(), 'Keep this draft when I log in.');
   assert.equal(await page.evaluate(() => window.sendCount), 1);
+  // Slow native loading must not dispatch a paid host call, even through the
+  // programmatic capability. Keep the draft and enable sending after real load.
+  const pendingLoad = await page.evaluate(async () => {
+    const manager = window.registry.getPlugin('document-manager').provides();
+    const id = crypto.randomUUID();
+    const opened = await manager.openDocumentUrl({ url: new URL('/slow.pdf', location.href).href, name: 'slow.pdf', documentId: id }).toPromise();
+    window.slowDocumentId = id;
+    window.slowDocumentLoaded = opened.task.toPromise();
+    const rin = window.registry.getPlugin('rin').provides();
+    rin.draft(id, 'Wait for this document.');
+    await rin.send(id);
+    return { ready: rin.ready(id), sends: window.sendCount, draft: rin.snapshot(id).draft, error: rin.snapshot(id).error };
+  });
+  assert.equal(pendingLoad.ready, false);
+  assert.equal(pendingLoad.sends, 1);
+  assert.equal(pendingLoad.draft, 'Wait for this document.');
+  assert.match(pendingLoad.error, /尚未准备好/);
+  await page.waitForFunction(() => window.registry.getPlugin('rin').provides().ready(window.slowDocumentId));
+  const loadedText = await page.evaluate(async () => (await window.registry.getPlugin('rin').provides().tools(window.slowDocumentId).readPages([1]))[0].text);
+  assert.match(loadedText, /Markdown headings/);
   // Native password-cancel/error-close also closes the host route, not an unbound viewer.
   const closed = await page.evaluate(async () => {
     window.viewer.remove();
@@ -167,7 +188,7 @@ try {
   assert.deepEqual(scanned.search, []);
   assert.deepEqual(errors, []);
   await writeFile(resolve(output, 'result.json'), JSON.stringify({ pdfPages: 3, sends: 1, textExtracted: true,
-    collapsePreservesDraftAndRun: true, unreadCitationRejected: true, mobileClose: true, scannedPagesEmpty: true, pageErrors: errors }, null, 2));
+    collapsePreservesDraftAndRun: true, unreadCitationRejected: true, mobileClose: true, loadingBlocksHostSend: true, loadedToolsReady: true, scannedPagesEmpty: true, pageErrors: errors }, null, 2));
   console.log('Native viewer PDF/plugin browser smoke passed.');
 } finally {
   await page.screenshot({ path: resolve(output, 'last-state.png') }).catch(() => {});
