@@ -1,5 +1,6 @@
 import { EmbedPdfContainer } from './web-components/container';
 import { PDFViewerConfig } from './components/app';
+export { initReader } from './reader';
 
 // ============================================================================
 // Version
@@ -352,6 +353,8 @@ export { registerIcon, registerIcons } from './config/icon-registry';
 
 // Export the container class for typing
 export { EmbedPdfContainer };
+export { RinPlugin } from './plugins/rin/plugin';
+export type { RinHost, RinSnapshot, RinReply, RinMessage, RinDocumentTools, RinSession, RinPageText } from './plugins/rin/types';
 
 // Export main config type and tab bar visibility
 export type { PDFViewerConfig };

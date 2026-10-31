@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Local PDF · Rin plugin example</title>
+<body style="margin:0;font-family:system-ui"><label style="display:block;padding:12px">Open a local PDF <input id="file" type="file" accept=".pdf,application/pdf"></label>
+<div id="viewer" style="height:calc(100dvh - 50px)"></div>
+<script type="module">
+import { initReader } from './embedpdf.js';
+const input = document.querySelector('#file');
+let viewer;
+const drafts = new Map();
+const host = {
+  session: () => ({ status: 'anonymous' }), subscribeSession: () => () => {},
+  login: async () => { throw new Error('This example has no account or paid model connection.'); },
+  restore: id => drafts.get(id), save: (id, snapshot) => drafts.set(id, snapshot),
+  send: async () => { throw new Error('No model transport configured.'); }, stop: async () => {},
+};
+input.addEventListener('change', async () => {
+  const file = input.files[0];
+  if (!file) return;
+  viewer?.destroy();
+  viewer = await initReader({ target: document.querySelector('#viewer'), documentId: crypto.randomUUID(), title: file.name,
+    buffer: await file.arrayBuffer(), wasmUrl: new URL('./pdfium.wasm', location.href).href, host,
+    onOpenFile: () => input.click(), onClose: () => viewer?.destroy(), onReady: () => {}, onViewChange: () => {},
+  });
+});
+</script></body></html>

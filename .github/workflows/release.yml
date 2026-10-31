@@ -24,6 +24,7 @@ env:
 
 jobs:
   release:
+    if: github.repository == 'embedpdf/embed-pdf-viewer'
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
