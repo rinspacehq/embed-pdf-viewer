@@ -153,7 +153,7 @@ export class RinPlugin extends BasePlugin<RinPluginConfig, RinCapability> {
         const record = this.snapshot(id);
         if (record.running || !record.draft.trim()) return;
         if (!this.isDocumentReady(id)) { this.update(id, { error: 'PDF 尚未准备好，请稍后重试。' }); return; }
-        if (session.status !== 'authenticated') {
+        if (session.status !== 'authenticated' && session.status !== 'test') {
           try { await this.host.login(); }
           catch (error) { this.update(id, { error: error instanceof Error ? error.message : '请先登录。' }); }
           return;
