@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-export type RinSession = { status: 'loading' | 'anonymous' | 'authenticated'; accountId?: string };
+export type RinSession = { status: 'loading' | 'anonymous' | 'authenticated' | 'test'; accountId?: string };
 export type RinPageText = { page: number; text: string };
 export type RinMessage = { role: 'user' | 'assistant'; text: string; pages?: number[] };
 export type RinUsage = { inputTokens: number; outputTokens: number };

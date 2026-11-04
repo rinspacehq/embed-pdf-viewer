@@ -82,7 +82,7 @@ try {
         window.selected = await tools.selection();
         window.searchResults = await tools.search('Markdown', [2]);
         await new Promise(resolve => { window.finishSend = resolve; });
-        return { text: 'A heading uses #. [p:1]', pages: [1, 3], costSG: 0.000125 };
+        return { text: '# Reader answer\n\n- **Heading** uses `#`. [p:1]\n\n| Page | Topic |\n| --- | --- |\n| 1 | Markdown |\n\n<img src="https://invalid.example/tracker" onerror="window.readerXss=true">', pages: [1, 3], costSG: 0.000125 };
       }, stop: async () => {},
     };
     window.viewer = embed.default.init({ type: 'container', target: document.getElementById('viewer'),
@@ -109,7 +109,11 @@ try {
   await rinButton.click();
   await rinButton.click();
   await page.evaluate(() => window.finishSend());
-  await page.getByText('A heading uses #. [p:1]', { exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'Reader answer' }).waitFor();
+  assert.equal(await page.locator('.rin-markdown strong').allTextContents().then(items => items.includes('Heading')), true);
+  assert.equal(await page.locator('.rin-markdown table td').count(), 2);
+  assert.equal(await page.locator('.rin-markdown img').count(), 0);
+  assert.equal(await page.evaluate(() => window.readerXss === true), false);
   assert.equal(await page.evaluate(() => window.sendCount), 1);
   assert.match(await page.evaluate(() => window.extracted), /Markdown headings/);
   assert.equal(await page.evaluate(() => window.documentInfo.pageCount), 3);

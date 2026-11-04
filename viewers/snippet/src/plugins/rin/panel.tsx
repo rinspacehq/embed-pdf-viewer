@@ -4,6 +4,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { usePlugin } from '@embedpdf/core/preact';
 import { UIPlugin } from '@embedpdf/plugin-ui';
 import { RinPlugin } from './plugin';
+import { renderRinMarkdown } from './markdown';
 
 export function RinPanel({ documentId }: { documentId: string }) {
   const { plugin } = usePlugin<RinPlugin>('rin');
@@ -21,7 +22,9 @@ export function RinPanel({ documentId }: { documentId: string }) {
     <div className="min-h-0 flex-1 overflow-auto p-3" aria-live="polite">
       {record.messages.map((message, index) => <article key={index} className="mb-4">
         <div className="mb-1 text-xs text-fg-secondary">{message.role === 'user' ? '你' : '琳'}</div>
-        <div className="select-text whitespace-pre-wrap break-words text-sm">{message.text}</div>
+        {message.role === 'assistant'
+          ? <div className="rin-markdown select-text break-words text-sm" dangerouslySetInnerHTML={{ __html: renderRinMarkdown(message.text) }} />
+          : <div className="select-text whitespace-pre-wrap break-words text-sm">{message.text}</div>}
         {message.pages?.map(page => <button key={page} type="button" className="mr-2 mt-2 rounded border px-2 py-1 text-xs" onClick={() => capability.tools(documentId).navigate(page)}>第 {page} 页</button>)}
       </article>)}
       {record.running && <p role="status" className="text-sm text-fg-secondary">正在阅读…</p>}
