@@ -199,15 +199,15 @@ export class RinPlugin extends BasePlugin<RinPluginConfig, RinCapability> {
     };
   }
 
-  private async send(id: string, action?: RinCheckAction, actionMessage?: string): Promise<void> {
+  private async send(id: string, action?: RinCheckAction, actionMessage?: string, recover = false): Promise<void> {
     if (this.changingConversation.has(id)) return;
     const session = this.host.session();
     const record = this.snapshot(id);
-    const retry = record.recoverable ? record.pendingRequest : undefined;
+    const retry = recover && record.recoverable ? record.pendingRequest : undefined;
     const message = retry?.message || actionMessage || record.draft.trim();
     const selectedAction = retry ? retry.action : action || record.draftAction;
     const submittedDraft = actionMessage === undefined && (!retry || retry.message === record.draft.trim());
-    if (record.running || !message) return;
+    if (record.running || record.recoverable && !recover || !message) return;
     if (!this.isDocumentReady(id)) { this.update(id, { error: 'PDF 尚未准备好，请稍后重试。' }); return; }
     if (session.status !== 'authenticated' && session.status !== 'test') {
       try { await this.host.login(); }
@@ -350,6 +350,7 @@ export class RinPlugin extends BasePlugin<RinPluginConfig, RinCapability> {
         } finally { this.changingConversation.delete(id); this.notify(); }
       },
       send: id => this.send(id),
+      retry: id => this.send(id, undefined, undefined, true),
       canCheck: id => Boolean(this.host.readingContext?.(id)),
       canHint: (id, checkId) => this.host.canHint?.(id,checkId) ?? true,
       selectCheck: (id, action) => { if (!this.changingConversation.has(id)) this.update(id, { draftAction: action }); },

@@ -136,6 +136,16 @@ try {
       return { main: { operationId: main.operationId, resultHash: main.resultHash }, branch: { operationId: branch.operationId, resultHash: branch.resultHash } };
     };
     window.sendCount = 0;
+    window.installRecoverableFixture = value => {
+      const id = window.registry.getPlugin('document-manager').provides().getActiveDocumentId();
+      const key = session.accountId + id;
+      const snapshot = snapshots.get(key) || { messages: [], draft: '', running: false };
+      snapshots.set(key, value
+        ? { ...snapshot, running: false, recoverable: true, error: '生成中断，请重试。', pendingRequest: { message: 'Continue the interrupted answer.' } }
+        : { ...snapshot, running: false, recoverable: false, error: undefined, pendingRequest: undefined });
+      conversationVersion++;
+      publish();
+    };
     const host = {
       session: () => session,
       subscribeSession: listener => { listeners.add(listener); return () => listeners.delete(listener); }, login: async () => { throw new Error('Unexpected login'); },
@@ -168,7 +178,19 @@ try {
   const rinButton = page.getByRole('button', { name: '琳', exact: true });
   await rinButton.click();
   const input = page.getByRole('textbox', { name: '发给琳的消息' });
-  await page.getByRole('button', { name: '语音', exact: true }).click();
+  const newConversation = page.getByRole('button', { name: '新对话', exact: true });
+  await newConversation.waitFor();
+  assert.equal(await newConversation.isDisabled(), true);
+  assert.match((await newConversation.textContent()).trim(), /新对话/);
+  await page.getByRole('button', { name: '琳设置', exact: true }).click();
+  await page.getByRole('heading', { name: '琳设置', exact: true }).waitFor();
+  assert.equal((await page.getByText('可用', { exact: true }).count()), 1);
+  assert.ok(Number(await page.getByRole('slider', { name: '琳面板宽度', exact: true }).inputValue()) >= 320);
+  await page.getByRole('button', { name: '关闭', exact: true }).click();
+  const voiceButton = page.getByRole('button', { name: '语音', exact: true });
+  assert.equal((await voiceButton.textContent()).trim(), '');
+  assert.equal(await voiceButton.locator('svg').count(), 1);
+  await voiceButton.click();
   const voiceText = page.getByRole('textbox', { name: '语音文字', exact: true });
   await voiceText.waitFor();
   assert.equal(await voiceText.inputValue(), '两个非零像量。');
@@ -184,12 +206,18 @@ try {
   await input.waitFor({ state: 'hidden' });
   await rinButton.click();
   assert.equal(await input.inputValue(), 'Explain a Markdown heading.');
-  await page.getByRole('button', { name: '发送', exact: true }).click();
+  const sendGeneration = page.getByRole('button', { name: '发送', exact: true });
+  assert.equal((await sendGeneration.textContent()).trim(), '');
+  assert.equal(await sendGeneration.locator('svg').count(), 1);
+  assert.equal(await page.locator('[data-rin-primary-action]').count(), 1);
+  await sendGeneration.click();
   await page.waitForFunction(() => typeof window.finishSend === 'function');
   const stopGeneration = page.getByRole('button', { name: '停止生成', exact: true });
   await stopGeneration.waitFor();
   assert.equal((await stopGeneration.textContent()).trim(), '');
   assert.equal(await stopGeneration.locator('svg').count(), 1);
+  assert.equal(await page.locator('[data-rin-primary-action]').count(), 1);
+  assert.equal(await page.getByRole('button', { name: '发送', exact: true }).count(), 0);
   await rinButton.click();
   await rinButton.click();
   await page.evaluate(() => window.finishSend());
@@ -199,6 +227,16 @@ try {
   assert.equal(await page.locator('.rin-markdown img').count(), 0);
   assert.equal(await page.evaluate(() => window.readerXss === true), false);
   assert.equal(await page.evaluate(() => window.sendCount), 1);
+  await page.evaluate(() => window.installRecoverableFixture(true));
+  const retryGeneration = page.getByRole('button', { name: '重试', exact: true });
+  await retryGeneration.waitFor();
+  assert.equal(await page.locator('[data-rin-primary-action]').count(), 1);
+  assert.equal(await page.getByRole('button', { name: '发送', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: '停止生成', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: '继续生成', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: '放弃恢复', exact: true }).count(), 1);
+  await page.evaluate(() => window.installRecoverableFixture(false));
+  await page.getByRole('button', { name: '发送', exact: true }).waitFor();
   assert.match(await page.evaluate(() => window.extracted), /Markdown headings/);
   assert.equal(await page.evaluate(() => window.documentInfo.pageCount), 3);
   assert.equal(await page.evaluate(() => window.selected[0].page), 2);
@@ -265,10 +303,13 @@ try {
       box.y >= 0 && box.y + box.height <= innerHeight);
   });
   const layout = async () => {
-    const box = await input.boundingBox();
-    const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
-    return { width: viewport.width, noPageOverflow: await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
-      inputWithinViewport: Boolean(box && box.x >= 0 && box.x + box.width <= viewport.width && box.y >= 0 && box.y + box.height <= viewport.height) };
+    return page.evaluate(() => {
+      const panel = Array.from(document.querySelectorAll('embedpdf-container'))
+        .map(element => element.shadowRoot?.querySelector('section[aria-label="琳"]')).find(Boolean);
+      const box = panel?.querySelector('textarea[aria-label="发给琳的消息"]')?.getBoundingClientRect();
+      return { width: innerWidth, noPageOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        inputWithinViewport: Boolean(box && box.width > 0 && box.height > 0 && box.x >= 0 && box.right <= innerWidth && box.y >= 0 && box.bottom <= innerHeight) };
+    });
   };
   await waitForInputInViewport();
   const layouts = [await layout()];
@@ -316,6 +357,8 @@ try {
   await rinButton.click();
   const pendingSend = page.getByRole('button', { name: '发送', exact: true });
   assert.equal(await pendingSend.isDisabled(), true);
+  assert.equal((await pendingSend.textContent()).trim(), '');
+  assert.equal(await pendingSend.locator('svg').count(), 1);
   await page.waitForFunction(() => window.registry.getPlugin('rin').provides().ready(window.slowDocumentId));
   assert.equal(await pendingSend.isDisabled(), false);
   const loadedText = await page.evaluate(async () => (await window.registry.getPlugin('rin').provides().tools(window.slowDocumentId).readPages([1]))[0].text);
