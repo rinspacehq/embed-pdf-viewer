@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: MIT
 import { UIPlugin, type UISchema } from '@embedpdf/plugin-ui';
 import type { Command } from '@embedpdf/plugin-commands';
+import { RinPlugin } from './plugin';
 
 export const rinCommand: Command = {
   id: 'rin:toggle', label: '琳', categories: ['rin'],
-  action: ({ registry, documentId }) => registry.getPlugin<UIPlugin>('ui')?.provides().forDocument(documentId).toggleSidebar('right', 'main', 'rin-panel'),
+  action: ({ registry, documentId }) => {
+    const rin = registry.getPlugin<RinPlugin>('rin')?.provides();
+    registry.getPlugin<UIPlugin>('ui')?.provides().forDocument(documentId).toggleSidebar('right', 'main', 'rin-panel', undefined,
+      rin ? { resize: { width: rin.panelWidth(), minWidth: 320, maxWidth: 800, onWidthChange: (width: number) => rin.resizePanel(width) } } : undefined);
+  },
 };
 
 export function withRinUI(schema: UISchema): UISchema {

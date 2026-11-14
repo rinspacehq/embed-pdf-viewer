@@ -3,6 +3,7 @@ import { createPortal } from 'preact/compat';
 import { useState, useRef, useCallback, useEffect } from 'preact/hooks';
 import { SidebarRendererProps, useItemRenderer, useUIContainer } from '@embedpdf/plugin-ui/preact';
 import { Icon } from '@/components/ui/icon';
+import { ResizableSidebar, type SidebarResizeOptions } from './resizable-sidebar';
 
 // Drawer snap points as percentages
 const SNAP_CLOSED = 0;
@@ -91,25 +92,25 @@ export function SchemaSidebar({
   const positionClasses = getPositionClasses(position.placement);
   const widthStyle = width ? { width } : undefined;
 
+  const sidebarContent = <div className="min-h-0 flex-1">
+    {content.type === 'tabs' && <TabsContent content={content} documentId={documentId} renderCustomComponent={renderCustomComponent} />}
+    {content.type === 'component' && <>{renderCustomComponent(content.componentId, documentId, sidebarProps ?? {})}</>}
+  </div>;
+  const resize = sidebarProps?.resize as SidebarResizeOptions | undefined;
+  if (container && resize && Number.isFinite(resize.width) && (position.placement === 'left' || position.placement === 'right')) {
+    return <ResizableSidebar id={schema.id} placement={position.placement} container={container} options={resize}
+      className={`${positionClasses} border-border-default bg-bg-surface flex flex-col shadow-lg`}>
+      {sidebarContent}
+    </ResizableSidebar>;
+  }
+
   return (
     <div
       className={`${positionClasses} border-border-default bg-bg-surface flex flex-col shadow-lg`}
       style={widthStyle}
       data-sidebar-id={schema.id}
     >
-      {/* Sidebar Content */}
-      <div className="min-h-0 flex-1">
-        {content.type === 'tabs' && (
-          <TabsContent
-            content={content}
-            documentId={documentId}
-            renderCustomComponent={renderCustomComponent}
-          />
-        )}
-        {content.type === 'component' && (
-          <>{renderCustomComponent(content.componentId, documentId, sidebarProps ?? {})}</>
-        )}
-      </div>
+      {sidebarContent}
     </div>
   );
 }
