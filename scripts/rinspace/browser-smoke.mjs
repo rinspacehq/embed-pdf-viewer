@@ -186,6 +186,10 @@ try {
   assert.equal(await input.inputValue(), 'Explain a Markdown heading.');
   await page.getByRole('button', { name: '发送', exact: true }).click();
   await page.waitForFunction(() => typeof window.finishSend === 'function');
+  const stopGeneration = page.getByRole('button', { name: '停止生成', exact: true });
+  await stopGeneration.waitFor();
+  assert.equal((await stopGeneration.textContent()).trim(), '');
+  assert.equal(await stopGeneration.locator('svg').count(), 1);
   await rinButton.click();
   await rinButton.click();
   await page.evaluate(() => window.finishSend());
@@ -204,6 +208,8 @@ try {
   const lessonFixture = await page.evaluate(() => window.installLessonFixture('matching-resume'));
   const continueNarration = page.getByRole('button', { name: '继续朗读', exact: true });
   await continueNarration.waitFor();
+  assert.equal((await continueNarration.textContent()).trim(), '');
+  assert.equal(await continueNarration.locator('svg').count(), 1);
   await continueNarration.click();
   assert.deepEqual(await page.evaluate(() => window.voicePlaySources.at(-1)), [{ operationId: lessonFixture.operationId,
     stepId: 'step-one', narrationIndex: 0, lessonResultHash: lessonFixture.resultHash }]);
@@ -307,7 +313,11 @@ try {
   assert.equal(pendingLoad.sends, 1);
   assert.equal(pendingLoad.draft, 'Wait for this document.');
   assert.match(pendingLoad.error, /尚未准备好/);
+  await rinButton.click();
+  const pendingSend = page.getByRole('button', { name: '发送', exact: true });
+  assert.equal(await pendingSend.isDisabled(), true);
   await page.waitForFunction(() => window.registry.getPlugin('rin').provides().ready(window.slowDocumentId));
+  assert.equal(await pendingSend.isDisabled(), false);
   const loadedText = await page.evaluate(async () => (await window.registry.getPlugin('rin').provides().tools(window.slowDocumentId).readPages([1]))[0].text);
   assert.match(loadedText, /Markdown headings/);
   if (actualZoom200) {

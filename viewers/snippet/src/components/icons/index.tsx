@@ -96,6 +96,8 @@ import { FormListboxIcon } from './form-listbox';
 import { FormTextfieldIcon } from './form-textfield';
 import { WidgetEditIcon } from './widget-edit';
 import { SignatureIcon } from './signature';
+import { PlayerPlayIcon } from './player-play';
+import { PlayerStopIcon } from './player-stop';
 
 export type Icons = {
   [key: string]: IconComponent;
@@ -199,4 +201,6 @@ export const icons: Icons = {
   formTextfield: FormTextfieldIcon,
   widgetEdit: WidgetEditIcon,
   signature: SignatureIcon,
+  playerPlay: PlayerPlayIcon,
+  playerStop: PlayerStopIcon,
 };
