@@ -136,9 +136,12 @@ function RinPanelContent({ documentId, pipSupported, poppedOut, pipError, openPi
         {record.costSG !== undefined && <details className="text-xs text-fg-secondary"><summary>实扣 {Number(record.costSG.toFixed(6))} 善功</summary>
           {record.usage && <p className="mt-2">输入 {record.usage.inputTokens} token · 输出 {record.usage.outputTokens} token</p>}
         </details>}</div>
-        <div className="flex gap-2">
-          {(record.running || record.recoverable) && <Button type="button" onClick={() => { void capability.stop(documentId); }}>停止</Button>}
-          {!record.running && <Button disabled={record.deletionPending || !capability.ready(documentId) || session.status === 'loading' || !record.draft.trim() && !record.pendingRequest} type="submit">{session.status === 'anonymous' ? '登录' : record.recoverable ? '继续' : record.draftAction ? record.draftAction.kind === 'challenge' ? '提交质疑' : '提交作答' : '发送'}</Button>}
+        <div className="flex items-center gap-2">
+          {(record.running || record.recoverable) && <Button type="button" aria-label="停止生成" tooltip="停止生成" className="rounded-full border border-border-default"
+            onClick={() => { void capability.stop(documentId); }}><Icon icon="playerStop" size={18} /></Button>}
+          {record.recoverable && !record.running && <Button disabled={record.deletionPending || !capability.ready(documentId) || session.status === 'loading'} type="submit"
+            aria-label="继续生成" tooltip="继续生成" className="rounded-full bg-fg-primary text-bg-surface hover:bg-fg-secondary"><Icon icon="playerPlay" size={18} /></Button>}
+          {!record.running && !record.recoverable && <Button disabled={record.deletionPending || !capability.ready(documentId) || session.status === 'loading' || !record.draft.trim()} type="submit">{session.status === 'anonymous' ? '登录' : record.draftAction ? record.draftAction.kind === 'challenge' ? '提交质疑' : '提交作答' : '发送'}</Button>}
         </div>
       </div>
     </form>

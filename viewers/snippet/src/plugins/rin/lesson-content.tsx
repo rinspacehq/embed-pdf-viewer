@@ -5,6 +5,7 @@ import type { RinRenderedLesson, RinVoiceControls, RinDocumentTools } from './ty
 import { mountRinLesson } from './lesson';
 import { narrationMatchesLesson } from './narration';
 import { Button } from '@/components/ui/button';
+import { Icon } from '@/components/ui/icon';
 
 export function RinLessonContent({ lesson, voice, tools, disabled }: { lesson: RinRenderedLesson; voice?: RinVoiceControls; tools?: RinDocumentTools; disabled?: boolean }) {
   const target = useRef<HTMLDivElement>(null);
@@ -42,8 +43,10 @@ export function RinLessonContent({ lesson, voice, tools, disabled }: { lesson: R
   };
   return <>
     {voice?.play && voice.stopPlayback && sources.length > 0 && <div className="mb-2 flex flex-wrap items-center gap-1">
-      <Button type="button" disabled={playing ? playback?.state === 'stopping' : disabled || !voice.available() || !['idle', 'error'].includes(voice.snapshot().input)}
-        onClick={() => run(() => playing ? voice.stopPlayback!() : voice.play!(sources))}>{playing ? '停止朗读' : resumable ? '继续朗读' : '朗读'}</Button>
+      <Button type="button" aria-label={playing ? '停止朗读' : resumable ? '继续朗读' : '朗读'} tooltip={playing ? '停止朗读' : resumable ? '继续朗读' : '朗读'}
+        className={playing ? 'rounded-full border border-border-default' : 'rounded-full bg-fg-primary text-bg-surface hover:bg-fg-secondary'}
+        disabled={playing ? playback?.state === 'stopping' : disabled || !voice.available() || !['idle', 'error'].includes(voice.snapshot().input)}
+        onClick={() => run(() => playing ? voice.stopPlayback!() : voice.play!(sources))}><Icon icon={playing ? 'playerStop' : 'playerPlay'} size={18} /></Button>
       {relevant && playback && voice.setFollow && <Button type="button" aria-pressed={playback.follow} onClick={() => voice.setFollow!(!playback.follow)}>跟随</Button>}
       {relevant && playback?.expired && <Button type="button" disabled={disabled || !voice.available()} onClick={() => run(() => voice.play!(sources, true))}>重新朗读</Button>}
       {(playError || relevant && playback?.error) && <span role="alert" className="text-xs text-fg-secondary">{playError || playback?.error}</span>}

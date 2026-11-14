@@ -32,6 +32,7 @@ export function Button({
           ? 'bg-interactive-selected text-accent ring-accent border-none shadow ring'
           : 'hover:bg-interactive-hover hover:ring-accent hover:ring'
       } ${disabled ? 'cursor-not-allowed opacity-50 hover:bg-transparent hover:ring-0' : 'cursor-pointer'} ${className}`}
+      disabled={disabled}
       title={tooltip}
       {...props}
     >

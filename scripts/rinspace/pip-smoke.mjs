@@ -183,6 +183,10 @@ try {
   const pip = context.pages().find(target => target !== page);
   assert.ok(pip, 'Native PiP page was not exposed by Chromium');
   await pip.getByRole('textbox', { name: '发给琳的消息' }).waitFor();
+  const pipStopGeneration = pip.getByRole('button', { name: '停止生成', exact: true });
+  await pipStopGeneration.waitFor();
+  assert.equal((await pipStopGeneration.textContent()).trim(), '');
+  assert.equal(await pipStopGeneration.locator('svg').count(), 1);
   await useNativeFocus(pip);
   const pipCDP = await context.newCDPSession(pip);
   const { targetInfo } = await pipCDP.send('Target.getTargetInfo');
