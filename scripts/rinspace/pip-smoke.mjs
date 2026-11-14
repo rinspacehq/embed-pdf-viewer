@@ -129,6 +129,10 @@ try {
   assert.equal(result.checks.evidence.rejectsChangedProfile, true);
   await page.getByRole('button', { name: '琳', exact: true }).click();
   const input = page.getByRole('textbox', { name: '发给琳的消息' });
+  const newConversation = page.getByRole('button', { name: '新对话', exact: true });
+  await newConversation.waitFor();
+  assert.match((await newConversation.textContent()).trim(), /新对话/);
+  await page.getByRole('button', { name: '琳设置', exact: true }).waitFor();
   const separator = page.getByRole('separator', { name: '调整侧栏宽度' });
   await separator.waitFor();
   if (disableDocumentPiP) {
@@ -175,7 +179,11 @@ try {
   assert.equal(await input.inputValue(), 'A draft survives resizing.');
   result.checks.resizing = { keyboard: true, pointer: true, escapeRestores: true, width: 520, samePanel: true, draftPreserved: true, collapseRestoresWidth: true };
   await input.fill('Explain the source and keep this session.');
-  await page.getByRole('button', { name: '发送', exact: true }).click();
+  const sendGeneration = page.getByRole('button', { name: '发送', exact: true });
+  assert.equal((await sendGeneration.textContent()).trim(), '');
+  assert.equal(await sendGeneration.locator('svg').count(), 1);
+  assert.equal(await page.locator('[data-rin-primary-action]').count(), 1);
+  await sendGeneration.click();
   await page.waitForFunction(() => typeof window.probe.finish === 'function');
   await page.evaluate(() => { window.probe.panel = window.probe.viewer.shadowRoot.querySelector('section[aria-label="琳"]'); });
   await page.getByRole('button', { name: '画中画', exact: true }).click();
@@ -187,6 +195,8 @@ try {
   await pipStopGeneration.waitFor();
   assert.equal((await pipStopGeneration.textContent()).trim(), '');
   assert.equal(await pipStopGeneration.locator('svg').count(), 1);
+  assert.equal(await pip.locator('[data-rin-primary-action]').count(), 1);
+  assert.equal(await pip.getByRole('button', { name: '发送', exact: true }).count(), 0);
   await useNativeFocus(pip);
   const pipCDP = await context.newCDPSession(pip);
   const { targetInfo } = await pipCDP.send('Target.getTargetInfo');
@@ -231,7 +241,10 @@ try {
   await draft.fill('The next question from PiP.');
   const savedDraft = await page.evaluate(() => window.probe.registry.getPlugin('rin').provides().snapshot('pip-fixture').draft);
   assert.equal(savedDraft, 'The next question from PiP.', 'Input must update shared state, not just the DOM value');
-  assert.equal(await pip.getByRole('button', { name: '发送', exact: true }).isEnabled(), true);
+  const pipSend = pip.getByRole('button', { name: '发送', exact: true });
+  assert.equal(await pipSend.isEnabled(), true);
+  assert.equal((await pipSend.textContent()).trim(), '');
+  assert.equal(await pipSend.locator('svg').count(), 1);
   result.checks.nativeViewport = await pip.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   assert.ok(result.checks.nativeViewport.width >= 300 && result.checks.nativeViewport.width <= 600);
   await page.evaluate(() => window.probe.viewer.setTheme('dark'));

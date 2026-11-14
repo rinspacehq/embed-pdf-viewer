@@ -140,6 +140,7 @@ export interface RinCapability {
   subscribe(listener: () => void): () => void;
   draft(documentId: string, text: string): void;
   send(documentId: string): Promise<void>;
+  retry(documentId: string): Promise<void>;
   stop(documentId: string): Promise<void>;
   tools(documentId: string): RinDocumentTools;
   canStartConversation(documentId: string): boolean;

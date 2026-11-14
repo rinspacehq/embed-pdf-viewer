@@ -8,7 +8,7 @@ import { RinPlugin } from './plugin';
 import { renderRinMarkdown } from './markdown';
 import { RinPictureInPicture } from './picture-in-picture';
 import { RinLessonContent } from './lesson-content';
-import type { RinCapability, RinConversationHistory, RinSnapshot } from './types';
+import type { RinCapability, RinConversationHistory, RinSession, RinSnapshot } from './types';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/ui/icon';
 import { Dialog } from '@/components/ui/dialog';
@@ -58,11 +58,19 @@ function RinPanelContent({ documentId, pipSupported, poppedOut, pipError, openPi
   const { plugin: ui } = usePlugin<UIPlugin>('ui');
   const capability = plugin?.provides();
   const [, refresh] = useState(0);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [panelWidth, setPanelWidth] = useState(() => capability?.panelWidth() || 408);
   const scroll = useRef<HTMLDivElement>(null);
   const transcript = useRef<HTMLDivElement>(null);
   const follows = useRef(true);
   const accountId = capability?.session().accountId;
   useEffect(() => capability?.subscribe(() => refresh(value => value + 1)), [capability]);
+  useEffect(() => {
+    setHistoryOpen(false);
+    setSettingsOpen(false);
+    if (capability) setPanelWidth(capability.panelWidth());
+  }, [documentId, accountId, capability]);
   useLayoutEffect(() => {
     const viewport = scroll.current, content = transcript.current;
     if (!viewport || !content) return;
@@ -74,12 +82,16 @@ function RinPanelContent({ documentId, pipSupported, poppedOut, pipError, openPi
   if (!capability) return null;
   const record = capability.snapshot(documentId);
   const session = capability.session();
+  const history = capability.history(documentId);
+  const canStartConversation = capability.canStartConversation(documentId);
+  const voiceAvailable = capability.voice(documentId)?.available() === true;
   return <section className="flex h-full min-h-0 flex-col text-fg-primary" aria-label="琳">
     <div className="border-border-default flex items-center justify-between border-b p-3 font-semibold"><span>琳</span>
-      <div className="flex gap-1">
-        <RinDelete documentId={documentId} capability={capability} pending={record.deletionPending}
-          cloud={Boolean(record.deletionPending || capability.canCheck(documentId) || record.messages.some(message => message.lesson))} />
-        {capability.canStartConversation(documentId) && <Button type="button" aria-label="新对话" tooltip="新对话" onClick={() => { void capability.newConversation(documentId); }}><Icon icon="plus" size={18} /></Button>}
+      <div className="flex min-w-0 items-center gap-1">
+        <Button type="button" aria-label="新对话" tooltip={canStartConversation ? '新对话' : '请先停止或恢复当前任务'} disabled={!canStartConversation}
+          className="gap-1 px-2 text-xs font-medium" onClick={() => { void capability.newConversation(documentId); }}><Icon icon="plus" size={16} /><span>新对话</span></Button>
+        <Button type="button" aria-label="对话记录" tooltip="对话记录" disabled={history.length === 0} onClick={() => setHistoryOpen(true)}><Icon icon="message" size={18} /></Button>
+        <Button type="button" aria-label="琳设置" tooltip="琳设置" onClick={() => setSettingsOpen(true)}><Icon icon="settings" size={18} /></Button>
         {pipSupported && !poppedOut && <Button type="button" aria-label="画中画" tooltip="画中画" onClick={openPiP}><Icon icon="externalLink" size={18} /></Button>}
         <Button type="button" aria-label={poppedOut ? '返回侧栏' : '收起琳'} tooltip={poppedOut ? '返回侧栏' : '收起琳'}
           onClick={() => poppedOut ? closePiP() : ui?.provides().forDocument(documentId).closeSidebarSlot('right', 'main')}><Icon icon={poppedOut ? 'arrowBackUp' : 'x'} size={18} /></Button>
@@ -88,10 +100,6 @@ function RinPanelContent({ documentId, pipSupported, poppedOut, pipError, openPi
     <div ref={scroll} className="min-h-0 flex-1 overflow-auto p-3" aria-live="polite" onScroll={event => {
       const target = event.currentTarget; follows.current = target.scrollHeight - target.scrollTop - target.clientHeight < 72;
     }}><div ref={transcript}>
-      {capability.history(documentId).length > 0 && <details className="mb-4 text-sm">
-        <summary className="cursor-pointer text-fg-secondary" onClick={() => { follows.current = false; }}>以往对话</summary>
-        {capability.history(documentId).map(item => <RinHistory key={`${session.accountId}:${item.id}`} documentId={documentId} item={item} capability={capability} />)}
-      </details>}
       {record.messages.map((message, index) => <article key={index} className="mb-4">
         <div className="mb-1 text-xs text-fg-secondary">{message.role === 'user' ? '你' : '琳'}</div>
         {message.role === 'assistant'
@@ -114,7 +122,13 @@ function RinPanelContent({ documentId, pipSupported, poppedOut, pipError, openPi
         {message.pages?.map(page => <button key={page} type="button" className="mr-2 mt-2 rounded border px-2 py-1 text-xs" onClick={() => capability.tools(documentId).navigate(page)}>第 {page} 页</button>)}
       </article>)}
       {record.running && <p role="status" className="text-sm text-fg-secondary">正在阅读…</p>}
-      {record.error && <p role="alert" className="mt-2 text-sm">{record.error}</p>}
+      {record.error && <div role="alert" className="mt-2 flex items-center gap-2 text-sm">
+        <span className="min-w-0 flex-1">{record.error}</span>
+        {record.recoverable && <>
+          <Button type="button" className="px-2" disabled={record.running} onClick={() => { follows.current = true; void capability.retry(documentId); }}>重试</Button>
+          <Button type="button" aria-label="放弃恢复" tooltip="放弃恢复" disabled={record.running} onClick={() => { void capability.stop(documentId); }}><Icon icon="x" size={16} /></Button>
+        </>}
+      </div>}
       {pipError && <p role="alert" className="mt-2 text-sm">{pipError}</p>}
     </div></div>
     <form className="border-border-default border-t p-3" onSubmit={event => { event.preventDefault(); follows.current = true; void capability.send(documentId); }}>
@@ -136,16 +150,45 @@ function RinPanelContent({ documentId, pipSupported, poppedOut, pipError, openPi
         {record.costSG !== undefined && <details className="text-xs text-fg-secondary"><summary>实扣 {Number(record.costSG.toFixed(6))} 善功</summary>
           {record.usage && <p className="mt-2">输入 {record.usage.inputTokens} token · 输出 {record.usage.outputTokens} token</p>}
         </details>}</div>
-        <div className="flex items-center gap-2">
-          {(record.running || record.recoverable) && <Button type="button" aria-label="停止生成" tooltip="停止生成" className="rounded-full border border-border-default"
-            onClick={() => { void capability.stop(documentId); }}><Icon icon="playerStop" size={18} /></Button>}
-          {record.recoverable && !record.running && <Button disabled={record.deletionPending || !capability.ready(documentId) || session.status === 'loading'} type="submit"
-            aria-label="继续生成" tooltip="继续生成" className="rounded-full bg-fg-primary text-bg-surface hover:bg-fg-secondary"><Icon icon="playerPlay" size={18} /></Button>}
-          {!record.running && !record.recoverable && <Button disabled={record.deletionPending || !capability.ready(documentId) || session.status === 'loading' || !record.draft.trim()} type="submit">{session.status === 'anonymous' ? '登录' : record.draftAction ? record.draftAction.kind === 'challenge' ? '提交质疑' : '提交作答' : '发送'}</Button>}
-        </div>
+        <div className="flex items-center gap-2"><RinPrimaryAction documentId={documentId} capability={capability} record={record} session={session} /></div>
       </div>
     </form>
+    <Dialog open={historyOpen} onClose={() => setHistoryOpen(false)} title="对话记录"
+      className="w-[min(36rem,calc(100vw-2rem))] max-w-full">
+      <div className="space-y-3 text-sm font-normal">
+        {history.map(item => <RinHistory key={`${session.accountId}:${item.id}`} documentId={documentId} item={item} capability={capability} />)}
+      </div>
+    </Dialog>
+    <Dialog open={settingsOpen} onClose={() => setSettingsOpen(false)} title="琳设置"
+      className="w-[min(30rem,calc(100vw-2rem))] max-w-full">
+      <div className="space-y-5 text-sm font-normal">
+        <div className="flex items-center justify-between gap-4"><span>语音</span><span className="text-fg-secondary">{voiceAvailable ? '可用' : '未启用'}</span></div>
+        <label className="block">
+          <span className="mb-2 flex items-center justify-between gap-4"><span>面板宽度</span><span className="text-fg-secondary">{panelWidth}px</span></span>
+          <input className="w-full" type="range" min="320" max="800" step="8" value={panelWidth} aria-label="琳面板宽度"
+            onInput={event => { const width = Number(event.currentTarget.value); setPanelWidth(width); capability.resizePanel(width); }} />
+        </label>
+        <div className="border-border-default flex items-center justify-between gap-4 border-t pt-4">
+          <span>当前对话</span>
+          <RinDelete documentId={documentId} capability={capability} pending={record.deletionPending} labelled
+            cloud={Boolean(record.deletionPending || capability.canCheck(documentId) || record.messages.some(message => message.lesson))} />
+        </div>
+      </div>
+    </Dialog>
   </section>;
+}
+
+function RinPrimaryAction({ documentId, capability, record, session }: {
+  documentId: string; capability: RinCapability; record: RinSnapshot; session: RinSession;
+}) {
+  const disabled = record.deletionPending || record.recoverable || !capability.ready(documentId) || session.status === 'loading';
+  const primaryClass = 'rounded-full bg-fg-primary text-bg-surface hover:bg-fg-secondary';
+  if (record.running) return <Button data-rin-primary-action="stop" type="button" aria-label="停止生成" tooltip="停止生成"
+    className={primaryClass} onClick={() => { void capability.stop(documentId); }}><Icon icon="playerStop" size={18} /></Button>;
+  if (session.status === 'anonymous') return <Button data-rin-primary-action="login" disabled={disabled || !record.draft.trim()} type="submit">登录</Button>;
+  const label = record.draftAction ? record.draftAction.kind === 'challenge' ? '提交质疑' : '提交作答' : '发送';
+  return <Button data-rin-primary-action="send" disabled={disabled || !record.draft.trim()} type="submit" aria-label={label} tooltip={label}
+    className={primaryClass}><Icon icon="arrowUp" size={18} /></Button>;
 }
 
 function RinVoiceInput({ documentId, capability }: { documentId: string; capability: RinCapability }) {
@@ -158,7 +201,7 @@ function RinVoiceInput({ documentId, capability }: { documentId: string; capabil
   const committing = useRef(false);
   const owner = useRef(voice); owner.current = voice;
   useEffect(() => { setText(snapshot?.transcript || ''); setError(''); }, [voice, snapshot?.transcript]);
-  if (!voice || !snapshot || !voice.available() && snapshot.input === 'idle') return null;
+  if (!voice || !snapshot) return <Button data-rin-voice-state="unavailable" type="button" aria-label="语音未启用" tooltip="语音未启用" disabled><Icon icon="microphone" size={18} /></Button>;
   const run = (operation: () => Promise<void>) => {
     setError('');
     void operation().catch(problem => { if (owner.current === voice) setError(problem instanceof Error ? problem.message : '语音暂时不可用。'); });
@@ -168,9 +211,11 @@ function RinVoiceInput({ documentId, capability }: { documentId: string; capabil
     snapshot.input === 'transcribing' ? '取消语音' : snapshot.input === 'stopping' ? '正在停止…' : snapshot.cleanupPending ? '确认停止' : '语音';
   return <>
     <div className="flex items-center gap-1">
-      <Button type="button" aria-label={label} disabled={['starting', 'stopping', 'review'].includes(snapshot.input) || !voice.available() && snapshot.input === 'idle'}
-        onClick={() => run(() => snapshot.input === 'listening' ? voice.finishInput() : snapshot.input === 'transcribing' || snapshot.cleanupPending ? voice.cancelInput() : voice.startInput())}>{label}</Button>
-      {['starting', 'listening'].includes(snapshot.input) && <Button type="button" aria-label="取消语音" tooltip="取消语音" onClick={() => run(() => voice.cancelInput())}><Icon icon="x" size={14} /></Button>}
+      <Button data-rin-voice-state={snapshot.input} type="button" aria-label={label} tooltip={label}
+        disabled={['starting', 'stopping', 'review'].includes(snapshot.input) || !voice.available() && snapshot.input === 'idle'}
+        onClick={() => run(() => snapshot.input === 'listening' ? voice.finishInput() : snapshot.input === 'transcribing' || snapshot.cleanupPending ? voice.cancelInput() : voice.startInput())}>
+        <Icon icon={snapshot.input === 'listening' || snapshot.input === 'transcribing' || snapshot.cleanupPending ? 'playerStop' : 'microphone'} size={18} />
+      </Button>
       {(snapshot.error || error) && <span role="alert" className="text-xs text-fg-secondary">{error || snapshot.error}</span>}
     </div>
     <Dialog open={snapshot.input === 'review'} onClose={close} title={snapshot.limitReached ? '录满一段，请确认文字' : '确认文字'}
@@ -221,8 +266,8 @@ function RinHistory({ documentId, item, capability }: { documentId: string; item
   </details>;
 }
 
-function RinDelete({ documentId, conversationId, capability, pending, cloud }: {
-  documentId: string; conversationId?: string; capability: RinCapability; pending?: boolean; cloud: boolean;
+function RinDelete({ documentId, conversationId, capability, pending, cloud, labelled = false }: {
+  documentId: string; conversationId?: string; capability: RinCapability; pending?: boolean; cloud: boolean; labelled?: boolean;
 }) {
   const [open, setOpen] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const active = useRef(true), identity = useRef(capability.session().accountId);
@@ -233,7 +278,8 @@ function RinDelete({ documentId, conversationId, capability, pending, cloud }: {
   if (!allowed && !open) return null;
   const label = pending ? '确认删除结果' : '删除对话';
   return <>
-    <Button type="button" aria-label={label} tooltip={label} disabled={!allowed || busy} onClick={() => { setError(''); setOpen(true); }}><Icon icon="trash" size={18} /></Button>
+    <Button type="button" aria-label={label} tooltip={label} disabled={!allowed || busy} className={labelled ? 'gap-1 px-2' : ''}
+      onClick={() => { setError(''); setOpen(true); }}><Icon icon="trash" size={18} />{labelled && <span>{label}</span>}</Button>
     <Dialog open={open} title={pending ? '确认删除结果' : '删除这段对话？'} onClose={() => { if (!busy) setOpen(false); }}>
       <div className="p-6 text-sm font-normal">
         <p>{cloud ? '删除本地和云端学习内容，保留 PDF 与账务记录。' : '删除本地对话记录，保留 PDF 与账务记录。'}</p>

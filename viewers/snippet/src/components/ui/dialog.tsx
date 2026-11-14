@@ -111,7 +111,7 @@ export function Dialog({
           <div className="border-border-subtle flex flex-shrink-0 items-center justify-between border-b px-6 py-4">
             {title && <h2 className="text-fg-primary text-lg font-semibold">{title}</h2>}
             {showCloseButton && (
-              <Button onClick={onClose} className="hover:bg-interactive-hover p-1">
+              <Button onClick={onClose} aria-label="关闭" tooltip="关闭" className="hover:bg-interactive-hover p-1">
                 <Icon icon="x" className="h-5 w-5" />
               </Button>
             )}

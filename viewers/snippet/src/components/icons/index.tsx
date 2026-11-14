@@ -45,6 +45,7 @@ import { ZoomInAreaIcon } from './zoom-in-area';
 import { ScreenshotIcon } from './screenshot';
 import { ArrowBackUpIcon } from './arrow-back-up';
 import { ArrowForwardUpIcon } from './arrow-forward-up';
+import { ArrowUpIcon } from './arrow-up';
 import { DeviceFloppyIcon } from './device-floppy';
 import { PencilMarkerIcon } from './pencil-marker';
 import { CircleIcon } from './circle';
@@ -98,6 +99,7 @@ import { WidgetEditIcon } from './widget-edit';
 import { SignatureIcon } from './signature';
 import { PlayerPlayIcon } from './player-play';
 import { PlayerStopIcon } from './player-stop';
+import { MicrophoneIcon } from './microphone';
 
 export type Icons = {
   [key: string]: IconComponent;
@@ -150,6 +152,7 @@ export const icons: Icons = {
   screenshot: ScreenshotIcon,
   arrowBackUp: ArrowBackUpIcon,
   arrowForwardUp: ArrowForwardUpIcon,
+  arrowUp: ArrowUpIcon,
   trash: TrashIcon,
   deviceFloppy: DeviceFloppyIcon,
   pencilMarker: PencilMarkerIcon,
@@ -203,4 +206,5 @@ export const icons: Icons = {
   signature: SignatureIcon,
   playerPlay: PlayerPlayIcon,
   playerStop: PlayerStopIcon,
+  microphone: MicrophoneIcon,
 };
