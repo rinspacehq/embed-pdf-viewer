@@ -2,12 +2,17 @@ import { createServer } from 'node:http';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 
+// READER_ACTUAL_ZOOM_200=true is an opt-in accessibility check. Run it with
+// READER_HEADED=true under an X server with xdotool; no browser is downloaded.
 const root = resolve(import.meta.dirname, '../../viewers/snippet/dist');
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright');
 const output = process.env.READER_EVIDENCE_DIR;
+const actualZoom200 = process.env.READER_ACTUAL_ZOOM_200 === 'true';
 if (!output) throw new Error('Set READER_EVIDENCE_DIR to an external evidence directory');
+if (actualZoom200 && process.env.READER_HEADED !== 'true') throw new Error('Actual browser zoom requires READER_HEADED=true');
 await mkdir(output, { recursive: true });
 
 function samplePdf(imageOnly = false) {
@@ -39,7 +44,7 @@ const server = createServer(async (request, response) => {
   if (pathname === '/favicon.ico') { response.writeHead(204).end(); return; }
   if (pathname === '/') {
     response.setHeader('Content-Type', 'text/html');
-    response.end('<!doctype html><html><body style="margin:0"><div id="viewer" style="height:100dvh"></div></body></html>');
+    response.end('<!doctype html><html><head><title>Reader learning browser smoke</title></head><body style="margin:0"><div id="viewer" style="height:100dvh"></div></body></html>');
     return;
   }
   if (pathname === '/fixture.pdf') { response.setHeader('Content-Type', 'application/pdf'); response.end(pdf); return; }
@@ -54,7 +59,7 @@ const server = createServer(async (request, response) => {
   } catch { response.writeHead(404).end(); }
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE, args: ['--disable-dev-shm-usage'] });
+const browser = await chromium.launch({ headless: process.env.READER_HEADED !== 'true', executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE, args: ['--disable-dev-shm-usage'] });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 page.setDefaultTimeout(20000);
 const errors = [];
@@ -68,12 +73,75 @@ try {
     const snapshots = new Map();
     let session = { status: 'authenticated', accountId: 'synthetic-reader' };
     const listeners = new Set();
+    let voiceState = { input: 'idle', transcript: '' };
+    let conversationVersion = 0;
+    const publish = () => listeners.forEach(listener => listener());
+    window.voicePlaySources = [];
+    const voice = {
+      available: () => true,
+      snapshot: () => voiceState,
+      startInput: async () => { voiceState = { input: 'review', transcript: '两个非零像量。' }; publish(); },
+      finishInput: async () => {}, cancelInput: async () => { voiceState = { input: 'idle', transcript: '' }; publish(); },
+      dismissTranscript: async () => { voiceState = { input: 'idle', transcript: '' }; publish(); },
+      confirmTranscript: async text => {
+        const id = window.registry.getPlugin('document-manager').provides().getActiveDocumentId();
+        const snapshot = snapshots.get(session.accountId + id) || { messages: [], draft: '', running: false };
+        const corrected = text.trim();
+        const draft = snapshot.draft ? `${snapshot.draft}\n${corrected}` : corrected;
+        snapshots.set(session.accountId + id, { ...snapshot, draft });
+        voiceState = { input: 'error', transcript: '', error: '结果待确认，请重试。', cleanupPending: true }; publish();
+        return draft;
+      },
+      play: async sources => { window.voicePlaySources.push(structuredClone(sources)); },
+      stopPlayback: async () => {},
+      setFollow: follow => { voiceState = { ...voiceState, playback: { ...voiceState.playback, follow } }; publish(); },
+      evidencePages: () => [2],
+    };
     window.changeReaderAccount = value => { session = value; listeners.forEach(listener => listener()); };
+    const lessonFixture = async (operationId, resultHash, text) => {
+      const html = `<div id="fragment-step-one"><p>${text}</p></div>`;
+      const bytes = new TextEncoder().encode(html);
+      const htmlDigest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
+      return { operationId, revision: 2,
+        view: { schema: 'reader-lesson-view/v1', steps: [{ id: 'step-one', kind: 'explanation', evidenceRefs: ['page-two'], narration: [text] }], next: 'done' },
+        html, htmlDigest, resultHash };
+    };
+    window.installLessonFixture = async mode => {
+      const id = window.registry.getPlugin('document-manager').provides().getActiveDocumentId();
+      const lesson = await lessonFixture('71000000-0000-4000-8000-000000000001', 'a'.repeat(64), 'Two vectors form a basis.');
+      const snapshot = snapshots.get(session.accountId + id) || { messages: [], draft: '', running: false };
+      snapshots.set(session.accountId + id, { ...snapshot,
+        messages: [...snapshot.messages.filter(message => !message.lesson), { role: 'assistant', text: '', lesson }] });
+      const source = { operationId: lesson.operationId, stepId: 'step-one', narrationIndex: 0,
+        lessonResultHash: mode === 'matching-resume' ? lesson.resultHash : 'b'.repeat(64) };
+      voiceState = { input: 'idle', transcript: '', playback: { state: mode === 'stale-playing' ? 'playing' : 'idle',
+        source: mode === 'stale-playing' ? source : undefined, resumeSource: mode === 'matching-resume' ? source : undefined,
+        receivedSamples: 24000, playedSamples: 12000, follow: true } };
+      conversationVersion++;
+      publish();
+      return { operationId: lesson.operationId, resultHash: lesson.resultHash, source };
+    };
+    window.installLessonBranchFixture = async () => {
+      const id = window.registry.getPlugin('document-manager').provides().getActiveDocumentId();
+      const main = await lessonFixture('71000000-0000-4000-8000-000000000011', 'c'.repeat(64), 'Original lesson narration.');
+      const branch = await lessonFixture('71000000-0000-4000-8000-000000000012', 'd'.repeat(64), 'Branch answer narration.');
+      const snapshot = snapshots.get(session.accountId + id) || { messages: [], draft: '', running: false };
+      snapshots.set(session.accountId + id, { ...snapshot, messages: [...snapshot.messages.filter(message => !message.lesson),
+        { role: 'assistant', text: '', lesson: main }, { role: 'assistant', text: '', lesson: branch }] });
+      const resumeSource = { operationId: main.operationId, stepId: 'step-one', narrationIndex: 0, lessonResultHash: main.resultHash };
+      voiceState = { input: 'idle', transcript: '', playback: { state: 'idle', resumeSource,
+        receivedSamples: 24000, playedSamples: 12000, follow: true } };
+      conversationVersion++;
+      publish();
+      return { main: { operationId: main.operationId, resultHash: main.resultHash }, branch: { operationId: branch.operationId, resultHash: branch.resultHash } };
+    };
     window.sendCount = 0;
     const host = {
       session: () => session,
       subscribeSession: listener => { listeners.add(listener); return () => listeners.delete(listener); }, login: async () => { throw new Error('Unexpected login'); },
       restore: id => snapshots.get(session.accountId + id), save: (id, snapshot) => snapshots.set(session.accountId + id, snapshot),
+      conversationVersion: () => String(conversationVersion),
+      voice: () => voice,
       send: async ({ tools }) => {
         window.sendCount++;
         const pages = await tools.readPages([1]);
@@ -90,6 +158,7 @@ try {
       wasmUrl: new URL('/pdfium.wasm', location.href).href, fonts: { ui: null, signature: null }, fontFallback: null,
       tabBar: 'never', stamp: { manifests: [] }, rin: { host } });
     window.registry = await Promise.race([window.viewer.registry, new Promise((_, reject) => setTimeout(() => reject(new Error('Viewer registry initialization timed out')), 20000))]);
+    window.originalDocumentId = window.registry.getPlugin('document-manager').provides().getActiveDocumentId();
   });
   await page.waitForFunction(() => window.registry?.getPlugin('document-manager').provides().getActiveDocument()?.pageCount === 3);
   await page.evaluate(async () => {
@@ -99,6 +168,17 @@ try {
   const rinButton = page.getByRole('button', { name: '琳', exact: true });
   await rinButton.click();
   const input = page.getByRole('textbox', { name: '发给琳的消息' });
+  await page.getByRole('button', { name: '语音', exact: true }).click();
+  const voiceText = page.getByRole('textbox', { name: '语音文字', exact: true });
+  await voiceText.waitFor();
+  assert.equal(await voiceText.inputValue(), '两个非零像量。');
+  await voiceText.fill('两个非零向量。');
+  await page.getByRole('button', { name: '加入消息', exact: true }).click();
+  await voiceText.waitFor({ state: 'hidden' });
+  assert.equal(await input.inputValue(), '两个非零向量。');
+  await page.getByText('结果待确认，请重试。', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '确认停止', exact: true }).click();
+  await page.getByRole('button', { name: '语音', exact: true }).waitFor();
   await input.fill('Explain a Markdown heading.');
   await rinButton.click();
   await input.waitFor({ state: 'hidden' });
@@ -121,10 +201,83 @@ try {
   assert.match(await page.evaluate(() => window.selected[0].text), /Reader test page 2/);
   assert.equal(await page.evaluate(() => window.searchResults[0].page), 2);
   assert.equal(await page.getByRole('button', { name: '第 3 页', exact: true }).count(), 0);
+  const lessonFixture = await page.evaluate(() => window.installLessonFixture('matching-resume'));
+  const continueNarration = page.getByRole('button', { name: '继续朗读', exact: true });
+  await continueNarration.waitFor();
+  await continueNarration.click();
+  assert.deepEqual(await page.evaluate(() => window.voicePlaySources.at(-1)), [{ operationId: lessonFixture.operationId,
+    stepId: 'step-one', narrationIndex: 0, lessonResultHash: lessonFixture.resultHash }]);
+  await page.evaluate(() => window.installLessonFixture('stale-playing'));
+  await page.getByRole('button', { name: '朗读', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '继续朗读', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: '停止朗读', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: '跟随', exact: true }).count(), 0);
+  assert.equal(await page.evaluate(() => Array.from(document.querySelectorAll('div'))
+    .find(element => element.shadowRoot?.getElementById('fragment-step-one'))?.shadowRoot
+    ?.getElementById('fragment-step-one')?.getAttribute('aria-current') || null), null);
+  const branchFixture = await page.evaluate(() => window.installLessonBranchFixture());
+  await page.getByText('Branch answer narration.', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '继续朗读', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('button', { name: '朗读', exact: true }).count(), 1);
+  await page.getByRole('button', { name: '继续朗读', exact: true }).click();
+  assert.deepEqual(await page.evaluate(() => window.voicePlaySources.at(-1)), [{ operationId: branchFixture.main.operationId,
+    stepId: 'step-one', narrationIndex: 0, lessonResultHash: branchFixture.main.resultHash }]);
+  const aria = await page.locator('section[aria-label="琳"]').ariaSnapshot();
+  assert.match(aria, /Original lesson narration\./);
+  assert.match(aria, /textbox "发给琳的消息"/);
+  assert.match(aria, /button "继续朗读"/);
+  const lessonText = page.getByText('Original lesson narration.', { exact: true });
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: `http://127.0.0.1:${server.address().port}` });
+  await lessonText.click({ clickCount: 3 });
+  const selection = await lessonText.evaluate(element => {
+    const root = element.getRootNode();
+    window.copyProbe = undefined; window.copyKeyProbe = [];
+    const recordKey = event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') window.copyKeyProbe.push({ target: event.target?.tagName || '', defaultPrevented: event.defaultPrevented }); };
+    element.addEventListener('keydown', recordKey, { capture: true });
+    root.addEventListener('keydown', recordKey, { capture: true });
+    document.addEventListener('keydown', recordKey, { capture: true });
+    const record = event => { window.copyProbe ||= { selected: root.getSelection?.()?.toString() || document.getSelection()?.toString() || '', defaultPrevented: event.defaultPrevented }; };
+    element.addEventListener('copy', record, { capture: true, once: true });
+    root.addEventListener('copy', record, { capture: true, once: true });
+    document.addEventListener('copy', record, { capture: true, once: true });
+    return { shadow: root.getSelection?.()?.toString() || '', document: document.getSelection()?.toString() || '' };
+  });
+  assert.match(selection.shadow || selection.document, /Original lesson narration\./);
+  await page.keyboard.press('Control+KeyC');
+  const copy = await page.evaluate(async () => ({ event: window.copyProbe, keys: window.copyKeyProbe, clipboardReadback: await navigator.clipboard.readText() }));
+  assert.ok(copy.keys.length, `Ctrl+C did not reach the lesson focus path: ${JSON.stringify(copy)}`);
+  assert.match(copy.event?.selected || '', /Original lesson narration\./, `Copy event did not use the lesson selection: ${JSON.stringify(copy)}`);
+  assert.equal(copy.event?.defaultPrevented, false);
+  if (copy.clipboardReadback) assert.equal(copy.clipboardReadback.trim(), 'Original lesson narration.');
   await page.getByRole('button', { name: '第 1 页', exact: true }).click();
+  const waitForInputInViewport = () => page.waitForFunction(() => {
+    const panel = Array.from(document.querySelectorAll('embedpdf-container'))
+      .map(element => element.shadowRoot?.querySelector('section[aria-label="琳"]')).find(Boolean);
+    const field = panel?.querySelector('textarea[aria-label="发给琳的消息"]');
+    const box = field?.getBoundingClientRect();
+    return Boolean(box && box.width > 0 && box.height > 0 && box.x >= 0 && box.x + box.width <= innerWidth &&
+      box.y >= 0 && box.y + box.height <= innerHeight);
+  });
+  const layout = async () => {
+    const box = await input.boundingBox();
+    const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+    return { width: viewport.width, noPageOverflow: await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+      inputWithinViewport: Boolean(box && box.x >= 0 && box.x + box.width <= viewport.width && box.y >= 0 && box.y + box.height <= viewport.height) };
+  };
+  await waitForInputInViewport();
+  const layouts = [await layout()];
+  assert.deepEqual(layouts[0], { width: 1440, noPageOverflow: true, inputWithinViewport: true });
   await page.screenshot({ path: resolve(output, 'desktop.png') });
+  let zoom200 = null;
+  await page.setViewportSize({ width: 768, height: 900 });
+  await waitForInputInViewport();
+  layouts.push(await layout());
+  assert.deepEqual(layouts[1], { width: 768, noPageOverflow: true, inputWithinViewport: true });
+  await page.screenshot({ path: resolve(output, 'tablet.png') });
   await page.setViewportSize({ width: 390, height: 844 });
-  await input.waitFor({ state: 'visible' });
+  await waitForInputInViewport();
+  layouts.push(await layout());
+  assert.deepEqual(layouts[2], { width: 390, noPageOverflow: true, inputWithinViewport: true });
   await page.screenshot({ path: resolve(output, 'mobile.png') });
   await page.getByRole('button', { name: '收起琳', exact: true }).click();
   await input.waitFor({ state: 'hidden' });
@@ -157,6 +310,69 @@ try {
   await page.waitForFunction(() => window.registry.getPlugin('rin').provides().ready(window.slowDocumentId));
   const loadedText = await page.evaluate(async () => (await window.registry.getPlugin('rin').provides().tools(window.slowDocumentId).readPages([1]))[0].text);
   assert.match(loadedText, /Markdown headings/);
+  if (actualZoom200) {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.evaluate(() => {
+      window.changeReaderAccount({ status: 'authenticated', accountId: 'synthetic-reader' });
+      const documents = window.registry.getPlugin('document-manager').provides();
+      documents.setActiveDocument(window.originalDocumentId);
+      const documentId = window.originalDocumentId;
+      const ui = window.registry.getPlugin('ui').provides().forDocument(documentId);
+      if (!ui.isSidebarOpen('right', 'main', 'rin-panel')) ui.toggleSidebar('right', 'main', 'rin-panel');
+      window.viewer.setTheme('dark');
+    });
+    await page.waitForFunction(() => window.registry.getPlugin('document-manager').provides().getActiveDocumentId() === window.originalDocumentId);
+    await waitForInputInViewport();
+    await page.bringToFront();
+    const ids = execFileSync('xdotool', ['search', '--name', 'Reader learning browser smoke - Chromium'], { encoding: 'utf8' }).trim().split(/\s+/);
+    const windowId = ids.at(-1);
+    assert.ok(windowId, 'Chromium window was not found for actual zoom');
+    for (let index = 0; index < 5; index++) execFileSync('xdotool', ['key', '--window', windowId, '--clearmodifiers', 'ctrl+plus']);
+    await page.waitForFunction(() => devicePixelRatio === 2 && innerWidth === 720);
+    await waitForInputInViewport();
+    await lessonText.scrollIntoViewIfNeeded();
+    await lessonText.waitFor({ state: 'visible' });
+    const box = await input.boundingBox();
+    zoom200 = await page.evaluate(() => {
+      const panel = Array.from(document.querySelectorAll('embedpdf-container')).map(element => element.shadowRoot?.querySelector('section[aria-label="琳"]')).find(Boolean);
+      const panelBox = panel?.getBoundingClientRect();
+      return { innerWidth, innerHeight, devicePixelRatio,
+        noPageOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        theme: { surface: getComputedStyle(window.viewer).getPropertyValue('--ep-background-surface').trim(),
+          foreground: panel ? getComputedStyle(panel).color : null },
+        panel: panel ? { x: panelBox.x, y: panelBox.y, width: panelBox.width, height: panelBox.height,
+          display: getComputedStyle(panel).display, visibility: getComputedStyle(panel).visibility } : null };
+    });
+    zoom200.inputWithinViewport = Boolean(box && box.x >= 0 && box.x + box.width <= zoom200.innerWidth &&
+      box.y >= 0 && box.y + box.height <= zoom200.innerHeight);
+    zoom200.inputBox = box;
+    assert.equal(zoom200.innerWidth, 720);
+    assert.equal(zoom200.innerHeight, 450);
+    assert.equal(zoom200.devicePixelRatio, 2);
+    assert.equal(zoom200.noPageOverflow, true);
+    assert.deepEqual(zoom200.theme, { surface: '#1f2937', foreground: 'rgb(249, 250, 251)' });
+    assert.equal(zoom200.inputWithinViewport, true, JSON.stringify(zoom200));
+    zoom200.lessonVisible = await lessonText.isVisible();
+    assert.equal(zoom200.lessonVisible, true);
+    await input.focus();
+    await page.keyboard.press('Tab');
+    zoom200.keyboardFocus = await page.evaluate(() => {
+      let active = document.activeElement;
+      while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+      const box = active instanceof HTMLElement ? active.getBoundingClientRect() : null;
+      return { tag: active?.tagName || null, label: active instanceof HTMLElement ? active.getAttribute('aria-label') || active.textContent?.trim() || null : null,
+        withinViewport: Boolean(box && box.width > 0 && box.height > 0 && box.x >= 0 && box.x + box.width <= innerWidth && box.y >= 0 && box.y + box.height <= innerHeight) };
+    });
+    assert.equal(zoom200.keyboardFocus.tag, 'BUTTON');
+    assert.equal(zoom200.keyboardFocus.withinViewport, true);
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await page.evaluate(() => {
+      let active = document.activeElement;
+      while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+      return active instanceof HTMLElement ? active.getAttribute('aria-label') : null;
+    }), '发给琳的消息');
+    await page.screenshot({ path: resolve(output, 'actual-zoom-200.png') });
+  }
   // Native password-cancel/error-close also closes the host route, not an unbound viewer.
   const closed = await page.evaluate(async () => {
     window.viewer.remove();
@@ -192,7 +408,12 @@ try {
   assert.deepEqual(scanned.search, []);
   assert.deepEqual(errors, []);
   await writeFile(resolve(output, 'result.json'), JSON.stringify({ pdfPages: 3, sends: 1, textExtracted: true,
-    collapsePreservesDraftAndRun: true, unreadCitationRejected: true, mobileClose: true, loadingBlocksHostSend: true, loadedToolsReady: true, scannedPagesEmpty: true, pageErrors: errors }, null, 2));
+    correctedVoiceTranscriptUsesHostCommit: true, lostCleanupAckKeepsVisibleDraft: true, collapsePreservesDraftAndRun: true,
+    exactLessonResumeSource: true, staleLessonResultIgnored: true, branchAnswerKeepsMainlineResume: true,
+    accessibilityTree: { lesson: true, messageInput: true, narrationControl: true },
+    lessonCopy: { selected: selection.shadow || selection.document, keyboardEvent: copy.event, clipboardReadback: copy.clipboardReadback || null }, layouts, zoom200,
+    unreadCitationRejected: true, mobileClose: true,
+    loadingBlocksHostSend: true, loadedToolsReady: true, scannedPagesEmpty: true, pageErrors: errors }, null, 2));
   console.log('Native viewer PDF/plugin browser smoke passed.');
 } finally {
   await page.screenshot({ path: resolve(output, 'last-state.png') }).catch(() => {});

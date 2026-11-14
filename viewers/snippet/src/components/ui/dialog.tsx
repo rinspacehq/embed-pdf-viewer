@@ -64,9 +64,10 @@ export function Dialog({
       }
     };
 
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [open, onClose]);
+    const ownerDocument = overlayRef.current?.ownerDocument || document;
+    ownerDocument.addEventListener('keydown', handleEscape);
+    return () => ownerDocument.removeEventListener('keydown', handleEscape);
+  }, [open, onClose, shouldRender]);
 
   // Handle backdrop click
   const handleBackdropClick = (e: MouseEvent) => {
@@ -77,14 +78,13 @@ export function Dialog({
 
   // Prevent body scroll when dialog is open
   useEffect(() => {
-    if (shouldRender) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
+    if (!shouldRender) return;
+    const ownerDocument = overlayRef.current?.ownerDocument || document;
+    const previous = ownerDocument.body.style.overflow;
+    ownerDocument.body.style.overflow = 'hidden';
 
     return () => {
-      document.body.style.overflow = '';
+      ownerDocument.body.style.overflow = previous;
     };
   }, [shouldRender]);
 
