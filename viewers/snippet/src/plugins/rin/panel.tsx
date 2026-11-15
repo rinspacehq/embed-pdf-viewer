@@ -124,10 +124,12 @@ function RinPanelContent({ documentId, pipSupported, poppedOut, pipError, openPi
       {record.running && <p role="status" className="text-sm text-fg-secondary">正在阅读…</p>}
       {record.error && <div role="alert" className="mt-2 flex items-center gap-2 text-sm">
         <span className="min-w-0 flex-1">{record.error}</span>
-        {record.recoverable && <>
+        {record.pendingRequest &&
           <Button type="button" className="px-2" disabled={record.running} onClick={() => { follows.current = true; void capability.retry(documentId); }}>重试</Button>
+        }
+        {record.recoverable &&
           <Button type="button" aria-label="放弃恢复" tooltip="放弃恢复" disabled={record.running} onClick={() => { void capability.stop(documentId); }}><Icon icon="x" size={16} /></Button>
-        </>}
+        }
       </div>}
       {pipError && <p role="alert" className="mt-2 text-sm">{pipError}</p>}
     </div></div>
@@ -182,7 +184,7 @@ function RinPrimaryAction({ documentId, capability, record, session }: {
   documentId: string; capability: RinCapability; record: RinSnapshot; session: RinSession;
 }) {
   const disabled = record.deletionPending || record.recoverable || !capability.ready(documentId) || session.status === 'loading';
-  const primaryClass = 'rounded-full bg-fg-primary text-bg-surface hover:bg-fg-secondary';
+  const primaryClass = 'rounded-full bg-fg-primary text-bg-surface hover:bg-fg-primary hover:opacity-80';
   if (record.running) return <Button data-rin-primary-action="stop" type="button" aria-label="停止生成" tooltip="停止生成"
     className={primaryClass} onClick={() => { void capability.stop(documentId); }}><Icon icon="playerStop" size={18} /></Button>;
   if (session.status === 'anonymous') return <Button data-rin-primary-action="login" disabled={disabled || !record.draft.trim()} type="submit">登录</Button>;

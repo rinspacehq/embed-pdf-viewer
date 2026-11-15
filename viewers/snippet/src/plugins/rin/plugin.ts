@@ -203,7 +203,7 @@ export class RinPlugin extends BasePlugin<RinPluginConfig, RinCapability> {
     if (this.changingConversation.has(id)) return;
     const session = this.host.session();
     const record = this.snapshot(id);
-    const retry = recover && record.recoverable ? record.pendingRequest : undefined;
+    const retry = recover ? record.pendingRequest : undefined;
     const message = retry?.message || actionMessage || record.draft.trim();
     const selectedAction = retry ? retry.action : action || record.draftAction;
     const submittedDraft = actionMessage === undefined && (!retry || retry.message === record.draft.trim());
@@ -232,10 +232,13 @@ export class RinPlugin extends BasePlugin<RinPluginConfig, RinCapability> {
         draftAction: submittedDraft && currentDraft === record.draft ? undefined : this.snapshot(id).draftAction,
         pendingRequest: undefined, recoverable: false, costSG: reply.costSG, usage: reply.usage });
     } catch (error) {
-      if (stillCurrent()) this.update(id, {
-        error: error instanceof Error ? error.message : '请求失败，请重试。',
-        recoverable: this.host.restore(id)?.recoverable ?? true, pendingRequest: this.host.restore(id)?.pendingRequest,
-      });
+      if (stillCurrent()) {
+        const restored = this.host.restore(id);
+        this.update(id, {
+          error: error instanceof Error ? error.message : '请求失败，请重试。',
+          recoverable: restored?.recoverable ?? true, pendingRequest: restored?.pendingRequest,
+        });
+      }
     } finally {
       if (stillCurrent()) this.update(id, { running: false });
       if (this.pending.get(id) === controller) this.pending.delete(id);
