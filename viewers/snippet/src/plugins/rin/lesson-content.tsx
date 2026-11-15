@@ -44,7 +44,7 @@ export function RinLessonContent({ lesson, voice, tools, disabled }: { lesson: R
   return <>
     {voice?.play && voice.stopPlayback && sources.length > 0 && <div className="mb-2 flex flex-wrap items-center gap-1">
       <Button type="button" aria-label={playing ? '停止朗读' : resumable ? '继续朗读' : '朗读'} tooltip={playing ? '停止朗读' : resumable ? '继续朗读' : '朗读'}
-        className={playing ? 'rounded-full border border-border-default' : 'rounded-full bg-fg-primary text-bg-surface hover:bg-fg-secondary'}
+        className={playing ? 'rounded-full border border-border-default' : 'rounded-full bg-fg-primary text-bg-surface hover:bg-fg-primary hover:opacity-80'}
         disabled={playing ? playback?.state === 'stopping' : disabled || !voice.available() || !['idle', 'error'].includes(voice.snapshot().input)}
         onClick={() => run(() => playing ? voice.stopPlayback!() : voice.play!(sources))}><Icon icon={playing ? 'playerStop' : 'playerPlay'} size={18} /></Button>
       {relevant && playback && voice.setFollow && <Button type="button" aria-pressed={playback.follow} onClick={() => voice.setFollow!(!playback.follow)}>跟随</Button>}

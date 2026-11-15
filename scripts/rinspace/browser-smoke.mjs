@@ -146,6 +146,15 @@ try {
       conversationVersion++;
       publish();
     };
+    window.installTerminalFailureFixture = () => {
+      const id = window.registry.getPlugin('document-manager').provides().getActiveDocumentId();
+      const key = session.accountId + id;
+      const snapshot = snapshots.get(key) || { messages: [], draft: '', running: false };
+      snapshots.set(key, { ...snapshot, running: false, recoverable: false, error: '回答渲染失败，请重试。',
+        pendingRequest: { message: 'Introduce this book.' } });
+      conversationVersion++;
+      publish();
+    };
     const host = {
       session: () => session,
       subscribeSession: listener => { listeners.add(listener); return () => listeners.delete(listener); }, login: async () => { throw new Error('Unexpected login'); },
@@ -210,6 +219,16 @@ try {
   assert.equal((await sendGeneration.textContent()).trim(), '');
   assert.equal(await sendGeneration.locator('svg').count(), 1);
   assert.equal(await page.locator('[data-rin-primary-action]').count(), 1);
+  const primaryBeforeHover = await sendGeneration.evaluate(element => {
+    const style = getComputedStyle(element); return { background: style.backgroundColor, color: style.color };
+  });
+  await sendGeneration.hover();
+  const primaryAfterHover = await sendGeneration.evaluate(element => {
+    const style = getComputedStyle(element); return { background: style.backgroundColor, color: style.color, opacity: style.opacity };
+  });
+  assert.equal(primaryAfterHover.background, primaryBeforeHover.background);
+  assert.equal(primaryAfterHover.color, primaryBeforeHover.color);
+  assert.equal(primaryAfterHover.opacity, '0.8');
   await sendGeneration.click();
   await page.waitForFunction(() => typeof window.finishSend === 'function');
   const stopGeneration = page.getByRole('button', { name: '停止生成', exact: true });
@@ -221,12 +240,20 @@ try {
   await rinButton.click();
   await rinButton.click();
   await page.evaluate(() => window.finishSend());
-  await page.getByRole('heading', { name: 'Reader answer' }).waitFor();
+  await page.getByRole('heading', { name: 'Reader answer' }).last().waitFor();
   assert.equal(await page.locator('.rin-markdown strong').allTextContents().then(items => items.includes('Heading')), true);
   assert.equal(await page.locator('.rin-markdown table td').count(), 2);
   assert.equal(await page.locator('.rin-markdown img').count(), 0);
   assert.equal(await page.evaluate(() => window.readerXss === true), false);
   assert.equal(await page.evaluate(() => window.sendCount), 1);
+  await page.evaluate(() => window.installTerminalFailureFixture());
+  const terminalRetry = page.getByRole('button', { name: '重试', exact: true });
+  await terminalRetry.waitFor();
+  assert.equal(await page.getByRole('button', { name: '放弃恢复', exact: true }).count(), 0);
+  await terminalRetry.click();
+  await page.waitForFunction(() => window.sendCount === 2 && typeof window.finishSend === 'function');
+  await page.evaluate(() => window.finishSend());
+  await page.getByRole('heading', { name: 'Reader answer' }).last().waitFor();
   await page.evaluate(() => window.installRecoverableFixture(true));
   const retryGeneration = page.getByRole('button', { name: '重试', exact: true });
   await retryGeneration.waitFor();
@@ -293,7 +320,7 @@ try {
   assert.match(copy.event?.selected || '', /Original lesson narration\./, `Copy event did not use the lesson selection: ${JSON.stringify(copy)}`);
   assert.equal(copy.event?.defaultPrevented, false);
   if (copy.clipboardReadback) assert.equal(copy.clipboardReadback.trim(), 'Original lesson narration.');
-  await page.getByRole('button', { name: '第 1 页', exact: true }).click();
+  await page.getByRole('button', { name: '第 1 页', exact: true }).last().click();
   const waitForInputInViewport = () => page.waitForFunction(() => {
     const panel = Array.from(document.querySelectorAll('embedpdf-container'))
       .map(element => element.shadowRoot?.querySelector('section[aria-label="琳"]')).find(Boolean);
@@ -336,7 +363,7 @@ try {
   await input.fill('Keep this draft when I log in.');
   await page.evaluate(() => window.changeReaderAccount({ status: 'authenticated', accountId: 'new-reader' }));
   assert.equal(await input.inputValue(), 'Keep this draft when I log in.');
-  assert.equal(await page.evaluate(() => window.sendCount), 1);
+  assert.equal(await page.evaluate(() => window.sendCount), 2);
   // Slow native loading must not dispatch a paid host call, even through the
   // programmatic capability. Keep the draft and enable sending after real load.
   const pendingLoad = await page.evaluate(async () => {
@@ -351,7 +378,7 @@ try {
     return { ready: rin.ready(id), sends: window.sendCount, draft: rin.snapshot(id).draft, error: rin.snapshot(id).error };
   });
   assert.equal(pendingLoad.ready, false);
-  assert.equal(pendingLoad.sends, 1);
+  assert.equal(pendingLoad.sends, 2);
   assert.equal(pendingLoad.draft, 'Wait for this document.');
   assert.match(pendingLoad.error, /尚未准备好/);
   await rinButton.click();
