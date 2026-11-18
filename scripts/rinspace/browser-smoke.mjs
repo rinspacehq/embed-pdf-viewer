@@ -169,7 +169,7 @@ try {
         window.selected = await tools.selection();
         window.searchResults = await tools.search('Markdown', [2]);
         await new Promise(resolve => { window.finishSend = resolve; });
-        return { text: '# Reader answer\n\n- **Heading** uses `#`. [p:1]\n\n| Page | Topic |\n| --- | --- |\n| 1 | Markdown |\n\n<img src="https://invalid.example/tracker" onerror="window.readerXss=true">', pages: [1, 3], costSG: 0.000125 };
+        return { text: '# Reader answer\n\n- **Heading** uses `#`. [p:1]\n\n| Page | Topic |\n| --- | --- |\n| 1 | Markdown |\n\nInline $x_1^2$, and inline \\(z_0\\).\n\n$$\n\\frac{a}{b}\n$$\n\nCode: `$literal$`.\n\n<img src="https://invalid.example/tracker" onerror="window.readerXss=true">', pages: [1, 3], costSG: 0.000125 };
       }, stop: async () => {},
     };
     window.viewer = embed.default.init({ type: 'container', target: document.getElementById('viewer'),
@@ -223,12 +223,16 @@ try {
     const style = getComputedStyle(element); return { background: style.backgroundColor, color: style.color };
   });
   await sendGeneration.hover();
+  await page.waitForFunction(() => {
+    const button = window.viewer.shadowRoot.querySelector('[data-rin-primary-action="send"]');
+    return button && Number(getComputedStyle(button).opacity) === .84;
+  });
   const primaryAfterHover = await sendGeneration.evaluate(element => {
     const style = getComputedStyle(element); return { background: style.backgroundColor, color: style.color, opacity: style.opacity };
   });
   assert.equal(primaryAfterHover.background, primaryBeforeHover.background);
   assert.equal(primaryAfterHover.color, primaryBeforeHover.color);
-  assert.equal(primaryAfterHover.opacity, '0.8');
+  assert.equal(primaryAfterHover.opacity, '0.84');
   await sendGeneration.click();
   await page.waitForFunction(() => typeof window.finishSend === 'function');
   const stopGeneration = page.getByRole('button', { name: '停止生成', exact: true });
@@ -243,6 +247,10 @@ try {
   await page.getByRole('heading', { name: 'Reader answer' }).last().waitFor();
   assert.equal(await page.locator('.rin-markdown strong').allTextContents().then(items => items.includes('Heading')), true);
   assert.equal(await page.locator('.rin-markdown table td').count(), 2);
+  assert.equal(await page.locator('.rin-markdown math msubsup').count(), 1);
+  assert.equal(await page.locator('.rin-markdown math msub').count(), 1);
+  assert.equal(await page.locator('.rin-markdown math[display="block"] mfrac').count(), 1);
+  assert.equal(await page.locator('.rin-markdown code').filter({ hasText: '$literal$' }).count(), 1);
   assert.equal(await page.locator('.rin-markdown img').count(), 0);
   assert.equal(await page.evaluate(() => window.readerXss === true), false);
   assert.equal(await page.evaluate(() => window.sendCount), 1);
@@ -486,6 +494,80 @@ try {
   });
   assert(scanned.reads.flat().every(item => item.text === ''));
   assert.deepEqual(scanned.search, []);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(async () => {
+    const { initReader } = await import('/embedpdf.js');
+    const original = await (await fetch('/fixture.pdf')).arrayBuffer();
+    const host = { session: () => ({ status: 'anonymous' }), subscribeSession: () => () => {},
+      login: async () => {}, restore: () => undefined, save: () => {},
+      send: async () => { throw Error('Unexpected model invocation'); }, stop: async () => {} };
+    window.openAnnotationProbe = async ({ useExport = false, edits = [] } = {}) => {
+      window.annotationReader?.destroy();
+      window.annotationProbe = { edits: [], errors: 0 };
+      const documentId = crypto.randomUUID();
+      let ready;
+      const loaded = new Promise(resolve => { ready = resolve; });
+      window.annotationReader = await initReader({ target: document.getElementById('viewer'), documentId, title: 'edits.pdf',
+        buffer: (useExport ? window.annotationCopy : original).slice(0),
+        wasmUrl: new URL('/pdfium.wasm', location.href).href, host, locale: 'zh-CN',
+        onOpenFile: () => {}, onClose: () => {}, onReady: () => ready(), onViewChange: () => {},
+        annotations: { edits, onEdit: edit => window.annotationProbe.edits.push(structuredClone(edit)),
+          onRestoreError: () => { window.annotationProbe.errors++; } } });
+      const registry = await document.querySelector('embedpdf-container').registry;
+      window.annotationScope = registry.getPlugin('annotation').provides().forDocument(documentId);
+      window.exportScope = registry.getPlugin('export').provides().forDocument(documentId);
+      await loaded;
+    };
+    await window.openAnnotationProbe();
+  });
+  await page.getByRole('button', { name: '批注', exact: true }).last().click();
+  await page.getByRole('button', { name: '自由绘制', exact: true }).click();
+  // The first fit-to-page reflows the stroke handlers after the native layout settles.
+  await page.waitForTimeout(500);
+  await page.mouse.move(560, 380);
+  await page.mouse.down();
+  await page.mouse.move(640, 435, { steps: 12 });
+  await page.mouse.move(700, 395, { steps: 10 });
+  await page.mouse.up();
+  await page.waitForFunction(() => window.annotationProbe.edits.length === 1).catch(async error => {
+    const diagnostics = await page.evaluate(() => ({ events: window.annotationProbe.edits.length,
+      active: window.annotationScope.getActiveTool()?.id,
+      annotations: window.annotationScope.getAnnotations().map(entry => ({ type: entry.object.type, commit: entry.commitState })) }));
+    throw new Error(`Ink commit was not observed: ${JSON.stringify(diagnostics)}`, { cause: error });
+  });
+  const inkEdit = await page.evaluate(() => window.annotationProbe.edits[0]);
+  assert.equal(inkEdit.pageIndex, 0);
+  assert.equal(typeof inkEdit.anchor, 'string');
+  assert.equal(inkEdit.item.annotation.inkList.length, 1);
+  await page.evaluate(async edits => {
+    window.annotationCopy = await window.exportScope.saveAsCopy().toPromise();
+    await window.openAnnotationProbe({ edits });
+  }, [inkEdit]);
+  const inkRestored = () => {
+    const annotations = window.annotationScope.getAnnotations({ pageIndex: 0 });
+    return annotations.length === 1 && annotations[0].object.inkList?.length === 1 &&
+      !window.annotationScope.getState().hasPendingChanges;
+  };
+  await page.waitForFunction(inkRestored);
+  assert.deepEqual(await page.evaluate(() => window.annotationProbe), { edits: [], errors: 0 });
+  // Opening the exported bytes exercises the existing native PDF save path.
+  await page.evaluate(() => window.openAnnotationProbe({ useExport: true }));
+  await page.waitForFunction(inkRestored);
+  await page.evaluate(() => {
+    const [ink] = window.annotationScope.getAnnotations({ pageIndex: 0 });
+    window.annotationScope.deleteAnnotation(0, ink.object.id);
+  });
+  await page.waitForFunction(() => window.annotationProbe.edits.length === 1);
+  const originalDeletion = await page.evaluate(() => window.annotationProbe.edits[0]);
+  assert.deepEqual(originalDeletion, { pageIndex: 0, anchor: 0, item: null });
+  await page.evaluate(edits => window.openAnnotationProbe({ useExport: true, edits }), [originalDeletion]);
+  // Wait for the document's native load and the replayed deletion to settle.
+  await page.waitForFunction(() => {
+    const state = window.annotationScope.getState();
+    return state.pages[0] && state.pages[0].length === 0 && !state.hasPendingChanges;
+  });
+  assert.deepEqual(await page.evaluate(() => window.annotationProbe), { edits: [], errors: 0 });
   assert.deepEqual(errors, []);
   await writeFile(resolve(output, 'result.json'), JSON.stringify({ pdfPages: 3, sends: 1, textExtracted: true,
     correctedVoiceTranscriptUsesHostCommit: true, lostCleanupAckKeepsVisibleDraft: true, collapsePreservesDraftAndRun: true,
@@ -493,7 +575,8 @@ try {
     accessibilityTree: { lesson: true, messageInput: true, narrationControl: true },
     lessonCopy: { selected: selection.shadow || selection.document, keyboardEvent: copy.event, clipboardReadback: copy.clipboardReadback || null }, layouts, zoom200,
     unreadCitationRejected: true, mobileClose: true,
-    loadingBlocksHostSend: true, loadedToolsReady: true, scannedPagesEmpty: true, pageErrors: errors }, null, 2));
+    loadingBlocksHostSend: true, loadedToolsReady: true, scannedPagesEmpty: true,
+    inlineAndDisplayMath: true, nativeInkRestored: true, embeddedDeletionRestored: true, exportReopensWithInk: true, pageErrors: errors }, null, 2));
   console.log('Native viewer PDF/plugin browser smoke passed.');
 } finally {
   await page.screenshot({ path: resolve(output, 'last-state.png') }).catch(() => {});

@@ -17,6 +17,21 @@
 .rin-markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
 .rin-markdown th, .rin-markdown td { border: 1px solid var(--ep-border-default); padding: .25em .45em; }
 .rin-markdown a { color: var(--ep-accent-primary); text-decoration: underline; }
+.rin-markdown math[display='block'] { display: block; overflow-x: auto; margin: .6em 0; }
+
+button.rin-primary-action {
+  border-radius: 999px;
+  background: var(--ep-foreground-primary);
+  color: var(--ep-background-surface);
+}
+button.rin-primary-action:not(:disabled):hover {
+  background: var(--ep-foreground-primary);
+  opacity: .84;
+}
+button.rin-primary-action:focus-visible {
+  outline: 2px solid var(--ep-interactive-focus-ring);
+  outline-offset: 2px;
+}
 
 /* Webfonts are registered at document scope by `PDFViewer`. The UI family is
    applied via `--ep-font-family` so integrators can swap the viewer font
