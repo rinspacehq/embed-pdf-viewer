@@ -1,6 +1,6 @@
 {
   "name": "@rinspacehq/embedpdf-snippet",
-  "version": "2.15.1-rinspace.9",
+  "version": "2.15.1-rinspace.10",
   "main": "dist/embedpdf.js",
   "types": "dist/embedpdf.d.ts",
   "license": "MIT",
@@ -51,6 +51,7 @@
     "@embedpdf/plugin-viewport": "2.15.1",
     "@embedpdf/plugin-zoom": "2.15.1",
     "dompurify": "3.3.1",
+    "katex": "0.19.0",
     "marked": "16.4.2",
     "preact": "^10.17.0",
     "tailwind-merge": "^3.4.0"

@@ -88,7 +88,7 @@ function RinPanelContent({ documentId, pipSupported, poppedOut, pipError, openPi
   return <section className="flex h-full min-h-0 flex-col text-fg-primary" aria-label="琳">
     <div className="border-border-default flex items-center justify-between border-b p-3 font-semibold"><span>琳</span>
       <div className="flex min-w-0 items-center gap-1">
-        <Button type="button" aria-label="新对话" tooltip={canStartConversation ? '新对话' : '请先停止或恢复当前任务'} disabled={!canStartConversation}
+        <Button type="button" aria-label="新对话" tooltip={record.running || record.recoverable ? '请先停止或恢复当前任务' : '新对话'} disabled={!canStartConversation}
           className="gap-1 px-2 text-xs font-medium" onClick={() => { void capability.newConversation(documentId); }}><Icon icon="plus" size={16} /><span>新对话</span></Button>
         <Button type="button" aria-label="对话记录" tooltip="对话记录" disabled={history.length === 0} onClick={() => setHistoryOpen(true)}><Icon icon="message" size={18} /></Button>
         <Button type="button" aria-label="琳设置" tooltip="琳设置" onClick={() => setSettingsOpen(true)}><Icon icon="settings" size={18} /></Button>
@@ -184,7 +184,7 @@ function RinPrimaryAction({ documentId, capability, record, session }: {
   documentId: string; capability: RinCapability; record: RinSnapshot; session: RinSession;
 }) {
   const disabled = record.deletionPending || record.recoverable || !capability.ready(documentId) || session.status === 'loading';
-  const primaryClass = 'rounded-full bg-fg-primary text-bg-surface hover:bg-fg-primary hover:opacity-80';
+  const primaryClass = 'rin-primary-action';
   if (record.running) return <Button data-rin-primary-action="stop" type="button" aria-label="停止生成" tooltip="停止生成"
     className={primaryClass} onClick={() => { void capability.stop(documentId); }}><Icon icon="playerStop" size={18} /></Button>;
   if (session.status === 'anonymous') return <Button data-rin-primary-action="login" disabled={disabled || !record.draft.trim()} type="submit">登录</Button>;

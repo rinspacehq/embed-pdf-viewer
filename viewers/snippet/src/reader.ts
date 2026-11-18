@@ -5,6 +5,8 @@ import { ScrollPlugin } from '@embedpdf/plugin-scroll';
 import { ZoomPlugin, ZoomMode } from '@embedpdf/plugin-zoom';
 import { RenderPlugin } from '@embedpdf/plugin-render';
 import { ViewportPlugin } from '@embedpdf/plugin-viewport';
+import { AnnotationPlugin } from '@embedpdf/plugin-annotation';
+import { bindReaderAnnotations } from './reader-annotations';
 import type { ReaderHandle, ReaderOptions } from './reader-api';
 export type { ReaderHandle, ReaderOptions } from './reader-api';
 
@@ -80,6 +82,10 @@ export async function initReader(options: ReaderOptions): Promise<ReaderHandle> 
     }), manager.onDocumentClosed(closedId => { if (closedId === id && !destroyed) options.onClose(); }),
       scroll.onScroll(sample), zoom.onZoomChange(sample),
       registry.getPlugin<ViewportPlugin>('viewport')!.provides().onViewportResize(event => { if (event.documentId === id) restoreAfterLayout(); })];
+    if (options.annotations) {
+      const scope = registry.getPlugin<AnnotationPlugin>('annotation')!.provides().forDocument(id);
+      unsubscribe.push(bindReaderAnnotations(scope, options.annotations));
+    }
     cleanup = () => { destroyed = true; clearTimeout(resizeTimer); window.removeEventListener('resize', restoreAfterLayout);
       viewer.removeEventListener('wheel', userScroll, true); viewer.removeEventListener('touchmove', userScroll, true);
       unsubscribe.forEach(stop => stop()); viewer.remove(); };
