@@ -235,6 +235,9 @@ try {
   assert.equal(primaryAfterHover.opacity, '0.84');
   await sendGeneration.click();
   await page.waitForFunction(() => typeof window.finishSend === 'function');
+  assert.equal(await input.inputValue(), '');
+  assert.equal(await page.getByText('Explain a Markdown heading.', { exact: true }).count(), 1);
+  await input.fill('Keep this next question as a draft.');
   const stopGeneration = page.getByRole('button', { name: '停止生成', exact: true });
   await stopGeneration.waitFor();
   assert.equal((await stopGeneration.textContent()).trim(), '');
@@ -245,6 +248,7 @@ try {
   await rinButton.click();
   await page.evaluate(() => window.finishSend());
   await page.getByRole('heading', { name: 'Reader answer' }).last().waitFor();
+  assert.equal(await input.inputValue(), 'Keep this next question as a draft.');
   assert.equal(await page.locator('.rin-markdown strong').allTextContents().then(items => items.includes('Heading')), true);
   assert.equal(await page.locator('.rin-markdown table td').count(), 2);
   assert.equal(await page.locator('.rin-markdown math msubsup').count(), 1);

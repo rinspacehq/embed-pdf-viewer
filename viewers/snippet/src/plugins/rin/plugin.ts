@@ -206,7 +206,7 @@ export class RinPlugin extends BasePlugin<RinPluginConfig, RinCapability> {
     const retry = recover ? record.pendingRequest : undefined;
     const message = retry?.message || actionMessage || record.draft.trim();
     const selectedAction = retry ? retry.action : action || record.draftAction;
-    const submittedDraft = actionMessage === undefined && (!retry || retry.message === record.draft.trim());
+    const submittedDraft = !recover && actionMessage === undefined;
     if (record.running || record.recoverable && !recover || !message) return;
     if (!this.isDocumentReady(id)) { this.update(id, { error: 'PDF 尚未准备好，请稍后重试。' }); return; }
     if (session.status !== 'authenticated' && session.status !== 'test') {
@@ -220,16 +220,21 @@ export class RinPlugin extends BasePlugin<RinPluginConfig, RinCapability> {
     const stillCurrent = () => accountId === this.host.session().accountId && conversationVersion === this.host.conversationVersion?.(id);
     const pages = new Set<number>();
     this.pending.set(id, controller);
-    if (!this.update(id, { running: true, error: undefined })) { this.pending.delete(id); return; }
+    const optimistic = recover ? { running: true, error: undefined } : {
+      messages: [...record.messages, { role: 'user' as const, text: message }],
+      draft: submittedDraft ? '' : record.draft,
+      regions: submittedDraft ? [] : record.regions,
+      draftAction: submittedDraft ? undefined : record.draftAction,
+      running: true,
+      error: undefined,
+    };
+    if (!this.update(id, optimistic)) { this.pending.delete(id); return; }
     try {
       const reply = await this.host.send({ documentId: id, message, action:selectedAction, tools: this.tools(id, controller.signal, pages), signal: controller.signal });
       if (controller.signal.aborted || !stillCurrent()) return;
-      const currentDraft = this.snapshot(id).draft;
-      this.update(id, { messages: [...record.messages, { role: 'user', text: message },
+      const current = this.snapshot(id);
+      this.update(id, { messages: [...current.messages,
         { role: 'assistant', text: reply.text, pages: reply.pages?.filter(page => pages.has(page)), lesson: reply.lesson }],
-        draft: submittedDraft && currentDraft === record.draft ? '' : currentDraft,
-        regions: submittedDraft && currentDraft === record.draft ? [] : this.snapshot(id).regions,
-        draftAction: submittedDraft && currentDraft === record.draft ? undefined : this.snapshot(id).draftAction,
         pendingRequest: undefined, recoverable: false, costSG: reply.costSG, usage: reply.usage });
     } catch (error) {
       if (stillCurrent()) {
