@@ -135,6 +135,7 @@ import {
   PdfAlphaColor,
   PdfBlendMode,
 } from '@embedpdf/models';
+import { openHttpRangeFile, type HttpRangeSource } from './http-range-file';
 import { computeFormDrawParams, isValidCustomKey, readArrayBuffer, readString } from './helper';
 import { WrappedPdfiumModule } from '@embedpdf/pdfium';
 import { DocumentContext, PageContext, PdfCache } from './cache';
@@ -346,15 +347,41 @@ export class PdfiumNative implements IPdfiumExecutor {
 
     const docPtr = this.pdfiumModule.FPDF_LoadMemDocument(filePtr, length, options?.password ?? '');
 
+    return this.finishOpeningDocument(file.id, docPtr, normalizeRotation, filePtr);
+  }
+
+  openDocumentRange(
+    id: string,
+    source: HttpRangeSource,
+    options: PdfOpenDocumentBufferOptions,
+    onError: (status: number) => void,
+  ): PdfTask<PdfDocumentObject> {
+    const file = openHttpRangeFile(this.pdfiumModule, source, onError);
+    let docPtr: number;
+    try {
+      docPtr = this.pdfiumModule.FPDF_LoadCustomDocument(file.pointer, options.password ?? '');
+    } catch (error) {
+      file.dispose();
+      throw error;
+    }
+    return this.finishOpeningDocument(id, docPtr, options.normalizeRotation ?? false, 0, file.dispose);
+  }
+
+  private finishOpeningDocument(
+    id: string,
+    docPtr: number,
+    normalizeRotation: boolean,
+    filePtr: number,
+    releaseFile?: () => void,
+  ): PdfTask<PdfDocumentObject> {
+    const free = releaseFile ?? (() => this.memoryManager.free(WasmPointer(filePtr)));
     if (!docPtr) {
       const lastError = this.pdfiumModule.FPDF_GetLastError();
-      this.logger.error(LOG_SOURCE, LOG_CATEGORY, `FPDF_LoadMemDocument failed with ${lastError}`);
-      this.memoryManager.free(filePtr);
-      this.logger.perf(LOG_SOURCE, LOG_CATEGORY, `OpenDocumentBuffer`, 'End', file.id);
-
+      free();
+      this.logger.perf(LOG_SOURCE, LOG_CATEGORY, 'OpenDocumentBuffer', 'End', id);
       return PdfTaskHelper.reject<PdfDocumentObject>({
         code: lastError,
-        message: `FPDF_LoadMemDocument failed`,
+        message: 'PDFium could not open the document',
       });
     }
 
@@ -380,8 +407,8 @@ export class PdfiumNative implements IPdfiumExecutor {
         this.memoryManager.free(sizePtr);
         this.memoryManager.free(boxPtr);
         this.pdfiumModule.FPDF_CloseDocument(docPtr);
-        this.memoryManager.free(filePtr);
-        this.logger.perf(LOG_SOURCE, LOG_CATEGORY, `OpenDocumentBuffer`, 'End', file.id);
+        free();
+        this.logger.perf(LOG_SOURCE, LOG_CATEGORY, `OpenDocumentBuffer`, 'End', id);
         return PdfTaskHelper.reject<PdfDocumentObject>({
           code: lastError,
           message: `${normalizeRotation ? 'EPDF_GetPageSizeByIndexNormalized' : 'FPDF_GetPageSizeByIndexF'} failed`,
@@ -414,7 +441,7 @@ export class PdfiumNative implements IPdfiumExecutor {
     const permissions = this.pdfiumModule.FPDF_GetDocPermissions(docPtr);
 
     const pdfDoc: PdfDocumentObject = {
-      id: file.id,
+      id,
       pageCount,
       pages,
       isEncrypted,
@@ -423,9 +450,9 @@ export class PdfiumNative implements IPdfiumExecutor {
       normalizedRotation: normalizeRotation,
     };
 
-    this.cache.setDocument(file.id, filePtr, docPtr, normalizeRotation);
+    this.cache.setDocument(id, filePtr, docPtr, normalizeRotation, releaseFile);
 
-    this.logger.perf(LOG_SOURCE, LOG_CATEGORY, `OpenDocumentBuffer`, 'End', file.id);
+    this.logger.perf(LOG_SOURCE, LOG_CATEGORY, `OpenDocumentBuffer`, 'End', id);
 
     return PdfTaskHelper.resolve(pdfDoc);
   }

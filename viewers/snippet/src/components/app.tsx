@@ -6,7 +6,7 @@ import { EmbedPDF } from '@embedpdf/core/preact';
 import { createPluginRegistration, PluginRegistry, PermissionConfig } from '@embedpdf/core';
 import { usePdfiumEngine } from '@embedpdf/engines/preact';
 import type { FontFallbackConfig } from '@embedpdf/engines';
-import { AllLogger, ConsoleLogger, PerfLogger, Rotation } from '@embedpdf/models';
+import { AllLogger, ConsoleLogger, PerfLogger, Rotation, type PdfEngine } from '@embedpdf/models';
 import {
   Viewport,
   ViewportPluginPackage,
@@ -226,6 +226,8 @@ export interface SnippetFontsConfig {
 }
 
 export interface PDFViewerConfig {
+  /** An engine whose lifecycle is owned by the caller. */
+  engine?: PdfEngine<Blob>;
   /** Optional Rin assistant. The application supplies identity and transport. */
   rin?: RinPluginConfig;
   // === Document Source (optional) ===
@@ -576,7 +578,14 @@ function ViewerLayout({ documentId, tabBarVisibility = 'multiple' }: ViewerLayou
 
 const logger = new AllLogger([new ConsoleLogger(), new PerfLogger()]);
 
-export function PDFViewer({ config, onRegistryReady }: PDFViewerProps) {
+export function PDFViewer(props: PDFViewerProps) {
+  return props.config.engine
+    ? <PDFViewerWithEngine {...props} engine={props.config.engine} />
+    : <ManagedPDFViewer {...props} />;
+}
+
+function ManagedPDFViewer(props: PDFViewerProps) {
+  const { config } = props;
   const { engine, isLoading } = usePdfiumEngine({
     ...(config.wasmUrl && { wasmUrl: config.wasmUrl }),
     ...(config.fontFallback !== undefined && { fontFallback: config.fontFallback }),
@@ -584,6 +593,12 @@ export function PDFViewer({ config, onRegistryReady }: PDFViewerProps) {
     logger: config.log ? logger : undefined,
   });
 
+  return <PDFViewerWithEngine {...props} engine={isLoading ? undefined : engine ?? undefined} />;
+}
+
+function PDFViewerWithEngine(
+  { config, onRegistryReady, engine }: PDFViewerProps & { engine?: PdfEngine<Blob> },
+) {
   // Memoize UIProvider props to prevent unnecessary remounts
   const uiComponents: UIComponents = useMemo(
     () => ({
@@ -630,7 +645,7 @@ export function PDFViewer({ config, onRegistryReady }: PDFViewerProps) {
     ensureFontStylesheet('ui', uiFont.stylesheetUrl, [uiFont.family]);
   }, [uiFont.family, uiFont.stylesheetUrl]);
 
-  if (!engine || isLoading)
+  if (!engine)
     return (
       <div className="embedpdf-snippet-root" style={uiFontStyle}>
         <style>{styles}</style>

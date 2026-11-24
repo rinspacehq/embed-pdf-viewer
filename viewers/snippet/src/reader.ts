@@ -7,14 +7,42 @@ import { RenderPlugin } from '@embedpdf/plugin-render';
 import { ViewportPlugin } from '@embedpdf/plugin-viewport';
 import { AnnotationPlugin } from '@embedpdf/plugin-annotation';
 import { bindReaderAnnotations } from './reader-annotations';
+import { createReaderRangedEngine } from './reader-ranged-engine.js';
 import type { ReaderHandle, ReaderOptions } from './reader-api';
-export type { ReaderHandle, ReaderOptions } from './reader-api';
+export type { ReaderHandle, ReaderOptions, ReaderRangeSource } from './reader-api';
 
 /** Native viewer with same-origin assets and a small framework-neutral host boundary. */
 export async function initReader(options: ReaderOptions): Promise<ReaderHandle> {
+  const { signal, rangeSource } = options;
+  signal?.throwIfAborted();
   const viewer = document.createElement('embedpdf-container') as EmbedPdfContainer;
+  let closed = false;
+  let disposeListeners = () => {};
+  const rangeError = (status: number) => {
+    if (closed) return;
+    cleanup();
+    options.onRangeError?.(status);
+  };
+  const engine = rangeSource
+    ? createReaderRangedEngine(new URL(options.wasmUrl, location.href).href, rangeSource, rangeError)
+    : undefined;
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    signal?.removeEventListener('abort', abort);
+    disposeListeners();
+    engine?.destroy?.();
+    viewer.remove();
+  };
+  let rejectAbort: (reason: unknown) => void = () => {};
+  const aborted = signal && new Promise<never>((_, reject) => { rejectAbort = reject; });
+  const abort = () => {
+    cleanup();
+    rejectAbort(signal?.reason);
+  };
+  signal?.addEventListener('abort', abort, { once: true });
   viewer.config = {
-    wasmUrl: options.wasmUrl, fonts: { ui: null, signature: null }, fontFallback: null,
+    engine, wasmUrl: options.wasmUrl, fonts: { ui: null, signature: null }, fontFallback: null,
     stamp: { manifests: [] }, tabBar: 'never', rin: { host: options.host },
     i18n: { defaultLocale: options.locale || 'en' },
     zoom: { defaultZoomLevel: ZoomMode.FitPage },
@@ -24,9 +52,8 @@ export async function initReader(options: ReaderOptions): Promise<ReaderHandle> 
     } },
   };
   options.target.append(viewer);
-  let cleanup = () => { viewer.remove(); };
   try {
-    const registry = await viewer.registry;
+    const registry = await (aborted ? Promise.race([viewer.registry, aborted]) : viewer.registry);
     const id = options.documentId;
     const manager = registry.getPlugin<DocumentManagerPlugin>('document-manager')!.provides();
     const scrolling = registry.getPlugin<ScrollPlugin>('scroll')!.provides();
@@ -86,11 +113,16 @@ export async function initReader(options: ReaderOptions): Promise<ReaderHandle> 
       const scope = registry.getPlugin<AnnotationPlugin>('annotation')!.provides().forDocument(id);
       unsubscribe.push(bindReaderAnnotations(scope, options.annotations));
     }
-    cleanup = () => { destroyed = true; clearTimeout(resizeTimer); window.removeEventListener('resize', restoreAfterLayout);
+    disposeListeners = () => { destroyed = true; clearTimeout(resizeTimer); window.removeEventListener('resize', restoreAfterLayout);
       viewer.removeEventListener('wheel', userScroll, true); viewer.removeEventListener('touchmove', userScroll, true);
-      unsubscribe.forEach(stop => stop()); viewer.remove(); };
-    const opened = await manager.openDocumentBuffer({ buffer: options.buffer, name: options.title, documentId: id }).toPromise();
-    void opened.task.toPromise().catch(() => {}); // Native password/error UI owns retry.
+      unsubscribe.forEach(stop => stop()); };
+    const opened = await (rangeSource
+      ? manager.openDocumentUrl({ url: new URL(rangeSource.url, location.href).href,
+          name: options.title, documentId: id, mode: 'range-request' })
+      : manager.openDocumentBuffer({ buffer: options.buffer, name: options.title, documentId: id })
+    ).toPromise();
+    // Native password/error UI owns retry for the local-file path.
+    void opened.task.toPromise().catch(() => { if (rangeSource) rangeError(0); });
     return {
       destroy: cleanup,
       async thumbnail() {

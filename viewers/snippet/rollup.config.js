@@ -8,6 +8,7 @@ import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import babel from '@rollup/plugin-babel';
 import typescript from '@rollup/plugin-typescript';
+import ts from 'typescript';
 import postcss from 'rollup-plugin-postcss';
 import autoprefixer from 'autoprefixer';
 import tailwindcss from '@tailwindcss/postcss';
@@ -36,9 +37,11 @@ function versionReplacer() {
   });
 }
 
+const engineSource = pathResolve(__dirname, '../../packages/engines/src');
+
 export default [
   {
-    input: 'src/embedpdf.ts',
+    input: { embedpdf: 'src/embedpdf.ts', 'reader-range-worker': 'src/reader-range-worker.js' },
     output: {
       dir: 'dist',
       format: 'esm',
@@ -73,6 +76,8 @@ export default [
       }),
       resolve({
         browser: true,
+        extensions: ['.mjs', '.js', '.json', '.node', '.ts', '.tsx'],
+        modulePaths: [pathResolve(__dirname, 'node_modules')],
         dedupe: [
           'react',
           'react-dom',
@@ -98,6 +103,17 @@ export default [
         inject: false,
         plugins: [autoprefixer(), tailwindcss()],
       }),
+      {
+        name: 'rinspace-range-engine-source',
+        transform(code, id) {
+          if (!id.startsWith(engineSource + '/') || !id.endsWith('.ts')) return null;
+          const result = ts.transpileModule(code, {
+            fileName: id,
+            compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ESNext, sourceMap: true },
+          });
+          return { code: result.outputText, map: result.sourceMapText };
+        },
+      },
       typescript(),
       versionReplacer(),
       babel({

@@ -35,12 +35,18 @@ export class PdfCache {
   }
 
   /** Open (or re-use) a document */
-  setDocument(id: string, filePtr: number, docPtr: number, normalizeRotation: boolean = false) {
+  setDocument(
+    id: string,
+    filePtr: number,
+    docPtr: number,
+    normalizeRotation = false,
+    releaseFile?: () => void,
+  ) {
     let ctx = this.docs.get(id);
     if (!ctx) {
       // Use per-document normalizeRotation, overriding global config
       const docConfig = { ...this.config, normalizeRotation };
-      ctx = new DocumentContext(filePtr, docPtr, this.pdfium, this.memoryManager, docConfig);
+      ctx = new DocumentContext(filePtr, docPtr, this.pdfium, this.memoryManager, docConfig, releaseFile);
       this.docs.set(id, ctx);
     }
   }
@@ -110,6 +116,7 @@ export class DocumentContext {
     pdfium: WrappedPdfiumModule,
     private readonly memoryManager: MemoryManager,
     config: Required<CacheConfig>,
+    private readonly releaseFile?: () => void,
   ) {
     this.normalizeRotation = config.normalizeRotation;
     this.pageCache = new PageCache(pdfium, docPtr, config);
@@ -147,7 +154,8 @@ export class DocumentContext {
     this.pageCache.pdf.FPDF_CloseDocument(this.docPtr);
 
     // 3️⃣ free the file handle through memory manager for proper tracking
-    this.memoryManager.free(WasmPointer(this.filePtr));
+    if (this.releaseFile) this.releaseFile();
+    else this.memoryManager.free(WasmPointer(this.filePtr));
   }
 }
 
