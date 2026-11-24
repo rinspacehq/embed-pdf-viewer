@@ -23,9 +23,11 @@ function fixture() {
   ]);
   const font = 3 + pageCount * 2;
   const image = font + 1;
+  const outline = image + 1;
+  const bookmark = outline + 1;
   const kids = Array.from({ length: pageCount }, (_, index) => `${3 + index * 2} 0 R`);
   const objects = [
-    object('<< /Type /Catalog /Pages 2 0 R >>'),
+    object(`<< /Type /Catalog /Pages 2 0 R /Outlines ${outline} 0 R >>`),
     object(`<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${pageCount} >>`),
   ];
   for (let index = 0; index < pageCount; index++) {
@@ -38,6 +40,8 @@ function fixture() {
   objects.push(object('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'));
   objects.push(stream(Buffer.alloc(2048 * 2048 * 3, 105),
     '/Type /XObject /Subtype /Image /Width 2048 /Height 2048 /ColorSpace /DeviceRGB /BitsPerComponent 8'));
+  objects.push(object(`<< /Type /Outlines /First ${bookmark} 0 R /Last ${bookmark} 0 R /Count 1 >>`));
+  objects.push(object(`<< /Title (Final chapter) /Parent ${outline} 0 R /Dest [${kids.at(-1)} /Fit] >>`));
   const parts = [object('%PDF-1.5\n')];
   const offsets = ['0000000000 65535 f \n'];
   let position = parts[0].length;
@@ -166,6 +170,25 @@ try {
   const firstPageBytes = requests.reduce((sum, item) => sum + item.bytes, 0);
   assert(firstPageBytes < pdf.length / 8, `first page fetched ${firstPageBytes} of ${pdf.length} bytes`);
   await page.screenshot({ path: resolve(output, 'range-first-page.png') });
+  await page.getByRole('button', { name: 'Sidebar', exact: true }).click();
+  const thumbnails = page.getByRole('tab', { name: 'Thumbnails', exact: true });
+  await thumbnails.focus();
+  await thumbnails.press('ArrowRight');
+  const outline = page.getByRole('tab', { name: 'Outline', exact: true });
+  assert.equal(await outline.getAttribute('aria-selected'), 'true');
+  const finalBookmark = page.getByText('Final chapter', { exact: true });
+  await finalBookmark.click();
+  await page.waitForFunction(count => {
+    const scroll = window.registry.getPlugin('scroll').provides().forDocument('publication-pdf-fixture');
+    const metrics = scroll.getMetrics();
+    return metrics.currentPage === count && !scroll.getPageChangeState().isChanging &&
+      metrics.pageVisibilityMetrics.some(item => item.pageNumber === count);
+  }, pageCount);
+  // Wait beyond the delayed viewport restore so a transient jump cannot pass.
+  await delay(400);
+  const activePage = await page.evaluate(() =>
+    window.registry.getPlugin('scroll').provides().forDocument('publication-pdf-fixture').getCurrentPage());
+  assert.equal(activePage, pageCount);
   assert(await pixels(pageCount - 1) > 5000);
   assert(requests.reduce((sum, item) => sum + item.bytes, 0) > firstPageBytes);
 
@@ -195,7 +218,8 @@ try {
   await page.waitForFunction(() => window.failure[0] === 0);
   assert.equal(await page.locator('embedpdf-container').count(), 0);
   assert.deepEqual(browserErrors, []);
-  const evidence = { fileBytes: pdf.length, firstPageBytes, farPage: true, revoked: 404, canceled: true, rejectedChangedETag: true };
+  const evidence = { fileBytes: pdf.length, firstPageBytes, farPage: true, stableBookmarkPage: activePage,
+    revoked: 404, canceled: true, rejectedChangedETag: true };
   await writeFile(resolve(output, 'range-test.json'), JSON.stringify(evidence, null, 2) + '\n');
   console.log(evidence);
 } finally {
