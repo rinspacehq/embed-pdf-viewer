@@ -37,7 +37,9 @@ jobs:
         env:
           PLAYWRIGHT_MODULE: ${{ github.workspace }}/viewers/snippet/node_modules/playwright/index.mjs
           READER_EVIDENCE_DIR: ${{ runner.temp }}/reader-evidence
-        run: node scripts/rinspace/browser-smoke.mjs
+        run: |
+          node scripts/rinspace/browser-smoke.mjs
+          node scripts/rinspace/range-browser-smoke.mjs
       - name: Pack the tested viewer
         working-directory: viewers/snippet
         env:

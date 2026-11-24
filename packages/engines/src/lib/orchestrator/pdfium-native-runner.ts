@@ -21,7 +21,8 @@ export interface WorkerRequest {
  */
 export interface WorkerResponse {
   id: string;
-  type: 'result' | 'error' | 'progress' | 'ready';
+  type: 'result' | 'error' | 'progress' | 'ready' | 'range-error';
+  status?: number;
   data?: any;
   error?: TaskError<any>;
   progress?: any;
@@ -192,7 +193,11 @@ export class PdfiumNativeRunner {
       this.logger.debug(LOG_SOURCE, LOG_CATEGORY, `Executing method: ${method}`);
 
       // Execute the method
-      const result = (this.native as any)[method](...args);
+      const result = method === 'openDocumentRange'
+        ? this.native.openDocumentRange(args[0], args[1], args[2], (status) => {
+            this.respond({ id: request.id, type: 'range-error', status });
+          })
+        : (this.native as any)[method](...args);
 
       // If result is a Task, handle it specially
       if (result && typeof result === 'object' && 'wait' in result) {

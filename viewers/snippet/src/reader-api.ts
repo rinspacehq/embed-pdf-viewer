@@ -18,12 +18,19 @@ export interface ReaderAnnotationHost {
   onEdit(edit: ReaderAnnotationEdit): void;
   onRestoreError(): void;
 }
-export interface ReaderOptions {
+export interface ReaderRangeSource {
+  url: string;
+  bytes: number;
+  etag: string;
+  headers?: Record<string, string>;
+}
+
+interface ReaderOptionsBase {
   target: HTMLElement;
   wasmUrl: string;
   documentId: string;
   title: string;
-  buffer: ArrayBuffer;
+  signal?: AbortSignal;
   host: RinHost;
   locale?: string;
   view?: ReaderView;
@@ -33,4 +40,8 @@ export interface ReaderOptions {
   onReady(pageCount: number): void;
   onViewChange(view: ReaderView): void;
 }
+export type ReaderOptions = ReaderOptionsBase & (
+  | { buffer: ArrayBuffer; rangeSource?: never; onRangeError?: never }
+  | { buffer?: never; rangeSource: ReaderRangeSource; onRangeError(status: number): void }
+);
 export interface ReaderHandle { destroy(): void; thumbnail(): Promise<Blob | undefined> }

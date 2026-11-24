@@ -44,6 +44,7 @@ import {
   AnnotationAppearanceMap,
 } from '@embedpdf/models';
 import type { WorkerRequest, WorkerResponse } from './pdfium-native-runner';
+import type { HttpRangeSource } from '../pdfium/http-range-file';
 import type { FontFallbackConfig } from '../pdfium/font-fallback';
 
 /**
@@ -74,6 +75,7 @@ const LOG_CATEGORY = 'Worker';
 type MessageType =
   | 'destroy'
   | 'openDocumentBuffer'
+  | 'openDocumentRange'
   | 'getMetadata'
   | 'setMetadata'
   | 'getDocPermissions'
@@ -152,6 +154,8 @@ export class RemoteExecutor implements IPdfiumExecutor {
   private requestCounter = 0;
   private logger: Logger;
   private readyTask: Task<boolean, PdfErrorReason>;
+  private destroyed = false;
+  private onRangeError?: (status: number) => void;
 
   constructor(
     private worker: Worker,
@@ -188,8 +192,12 @@ export class RemoteExecutor implements IPdfiumExecutor {
    * Waits for worker to be ready before sending
    */
   private send<T, P = unknown>(method: MessageType, args: any[]): Task<T, PdfErrorReason, P> {
-    const id = this.generateId();
     const task = new Task<T, PdfErrorReason, P>();
+    if (this.destroyed) {
+      task.abort('Worker destroyed');
+      return task;
+    }
+    const id = this.generateId();
 
     const request: WorkerRequest = {
       id,
@@ -227,6 +235,13 @@ export class RemoteExecutor implements IPdfiumExecutor {
    */
   private handleMessage = (event: MessageEvent<WorkerResponse>) => {
     const response = event.data;
+
+    if (response.type === 'range-error') {
+      const notify = this.onRangeError;
+      this.destroy();
+      notify?.(response.status ?? 0);
+      return;
+    }
 
     // Handle ready response - resolve the readyTask
     if (response.type === 'ready') {
@@ -279,6 +294,9 @@ export class RemoteExecutor implements IPdfiumExecutor {
    * Cleanup and terminate worker
    */
   destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.onRangeError = undefined;
     this.worker.removeEventListener('message', this.handleMessage);
 
     // Reject all pending requests (except readyTask)
@@ -289,6 +307,7 @@ export class RemoteExecutor implements IPdfiumExecutor {
       }
     });
     this.pendingRequests.clear();
+    this.readyTask.abort('Worker destroyed');
 
     this.worker.terminate();
     this.logger.debug(LOG_SOURCE, LOG_CATEGORY, 'RemoteExecutor destroyed');
@@ -301,6 +320,16 @@ export class RemoteExecutor implements IPdfiumExecutor {
     options?: PdfOpenDocumentBufferOptions,
   ): PdfTask<PdfDocumentObject> {
     return this.send<PdfDocumentObject>('openDocumentBuffer', [file, options]);
+  }
+
+  openDocumentRange(
+    id: string,
+    source: HttpRangeSource,
+    options: PdfOpenDocumentBufferOptions,
+    onError: (status: number) => void,
+  ): PdfTask<PdfDocumentObject> {
+    this.onRangeError = onError;
+    return this.send<PdfDocumentObject>('openDocumentRange', [id, source, options]);
   }
 
   getMetadata(doc: PdfDocumentObject): PdfTask<PdfMetadataObject> {
@@ -657,11 +686,29 @@ export class RemoteExecutor implements IPdfiumExecutor {
   }
 
   closeDocument(doc: PdfDocumentObject): PdfTask<boolean> {
-    return this.send<boolean>('closeDocument', [doc]);
+    return this.close('closeDocument', [doc]);
   }
 
   closeAllDocuments(): PdfTask<boolean> {
-    return this.send<boolean>('closeAllDocuments', []);
+    return this.close('closeAllDocuments', []);
+  }
+
+  private close(method: 'closeDocument' | 'closeAllDocuments', args: PdfDocumentObject[]) {
+    const task = new Task<boolean, PdfErrorReason>();
+    // A terminated worker has already released its documents. The document
+    // plugin can close them concurrently with a host-driven Reader teardown.
+    if (this.destroyed) {
+      task.resolve(true);
+    } else {
+      this.send<boolean>(method, args).wait(
+        (closed) => task.resolve(closed),
+        (error) => {
+          if (this.destroyed) task.resolve(true);
+          else task.fail(error);
+        },
+      );
+    }
+    return task;
   }
 
   setDocumentEncryption(

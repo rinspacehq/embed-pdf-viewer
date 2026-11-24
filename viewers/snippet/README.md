@@ -85,6 +85,12 @@ That’s it—refresh and enjoy a full‑featured viewer.
 </html>
 ```
 
+## Same-origin Reader PDFs
+
+Rinspace Reader hosts can provide `rangeSource` to `initReader` with the same-origin URL, verified byte length and strong ETag for a published PDF. Each missing chunk uses a bounded Range request with that ETag as its precondition. Use a versioned URL and authorize each request at the origin. The source endpoint must send `206`, the matching `Content-Range` and the matching `ETag`.
+
+The Reader host handles a terminal `onRangeError(status)` by returning to an error or reload state. Status `0` covers transport and response validation failures. Calling the handle’s `destroy()` or aborting the supplied signal terminates the dedicated worker and cancels pending reads. Local file hosts continue to supply `buffer`.
+
 ## 📄 License
 
 EmbedPDF Snippet is [MIT licensed](https://github.com/embedpdf/embed-pdf-viewer/blob/main/LICENSE). Commercial use is welcome—just keep the copyright headers intact.
