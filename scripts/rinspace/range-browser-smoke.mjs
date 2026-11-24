@@ -108,12 +108,13 @@ page.setDefaultTimeout(18000);
 const browserErrors = [];
 page.on('pageerror', error => browserErrors.push(error.message));
 
-async function open() {
+async function open(view) {
   requests.length = 0;
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
-  await page.evaluate(async ({ bytes, etag }) => {
+  await page.evaluate(async ({ bytes, etag, view }) => {
     const { initReader } = await import('/embedpdf.js');
     window.failure = [];
+    window.readingView = undefined;
     window.abortReading = new AbortController();
     const host = {
       session: () => ({ status: 'anonymous' }), subscribeSession: () => () => {},
@@ -123,14 +124,15 @@ async function open() {
     window.reader = await initReader({
       target: document.querySelector('#viewer'), wasmUrl: '/pdfium.wasm',
       documentId: 'publication-pdf-fixture', title: 'Synthetic book', host,
+      view,
       signal: window.abortReading.signal,
       rangeSource: { url: '/file.pdf', bytes, etag, headers: { 'X-Fixture-Access': 'synthetic' } },
-      onOpenFile: () => {}, onClose: () => {}, onViewChange: () => {},
+      onOpenFile: () => {}, onClose: () => {}, onViewChange: view => { window.readingView = view; },
       onReady: value => { window.pageCount = value; },
       onRangeError: status => { window.failure.push(status); },
     });
     window.registry = await document.querySelector('embedpdf-container')?.registry;
-  }, { bytes: pdf.length, etag });
+  }, { bytes: pdf.length, etag, view });
 }
 async function pixels(index) {
   return page.evaluate(async pageIndex => {
@@ -191,6 +193,19 @@ try {
   assert.equal(activePage, pageCount);
   assert(await pixels(pageCount - 1) > 5000);
   assert(requests.reduce((sum, item) => sum + item.bytes, 0) > firstPageBytes);
+
+  await open();
+  await verifyReady();
+  await page.getByRole('button', { name: 'Next Page', exact: true }).click();
+  const pageTwoView = await page.waitForFunction(() =>
+    window.readingView?.pageIndex === 1 && window.readingView, undefined, { timeout: 4000 });
+  await open(await pageTwoView.jsonValue());
+  await verifyReady();
+  await page.waitForFunction(() => {
+    const scroll = window.registry.getPlugin('scroll').provides().forDocument('publication-pdf-fixture');
+    const metrics = scroll.getMetrics();
+    return metrics.currentPage === 2 && metrics.pageVisibilityMetrics.some(item => item.pageNumber === 2);
+  }, undefined, { timeout: 4000 });
 
   await open();
   await verifyReady();

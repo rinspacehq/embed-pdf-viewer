@@ -334,7 +334,7 @@ try {
   if (copy.clipboardReadback) assert.equal(copy.clipboardReadback.trim(), 'Original lesson narration.');
   await page.getByRole('button', { name: '第 1 页', exact: true }).last().click();
   const settledLayout = async () => {
-    const result = await page.waitForFunction(async () => {
+    return page.evaluate(async () => {
       const measure = () => {
         const panel = Array.from(document.querySelectorAll('embedpdf-container'))
           .map(element => element.shadowRoot?.querySelector('section[aria-label="琳"]')).find(Boolean);
@@ -346,13 +346,20 @@ try {
             box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight),
         };
       };
-      const first = measure();
-      if (!first.inputWithinViewport || !first.noPageOverflow) return false;
-      await new Promise(resolve => requestAnimationFrame(resolve));
-      const next = measure();
-      return next.inputWithinViewport && next.noPageOverflow && next.width === first.width && next;
+      const deadline = performance.now() + 5000;
+      let fittedWidth;
+      while (performance.now() < deadline) {
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        const dimensions = measure();
+        if (dimensions.inputWithinViewport && dimensions.noPageOverflow) {
+          if (fittedWidth === dimensions.width) return dimensions;
+          fittedWidth = dimensions.width;
+        } else {
+          fittedWidth = undefined;
+        }
+      }
+      throw new Error(`Reader layout did not fit on consecutive frames: ${JSON.stringify(measure())}`);
     });
-    return result.jsonValue();
   };
   const layouts = [await settledLayout()];
   assert.deepEqual(layouts[0], { width: 1440, noPageOverflow: true, inputWithinViewport: true });
