@@ -196,7 +196,7 @@ try {
 
   await open();
   await verifyReady();
-  await page.getByRole('button', { name: 'Next page', exact: true }).click();
+  await page.getByRole('button', { name: 'Next Page', exact: true }).click();
   const pageTwoView = await page.waitForFunction(() =>
     window.readingView?.pageIndex === 1 && window.readingView, undefined, { timeout: 4000 });
   await open(await pageTwoView.jsonValue());
