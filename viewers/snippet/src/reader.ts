@@ -115,7 +115,11 @@ export async function initReader(options: ReaderOptions): Promise<ReaderHandle> 
     }), manager.onDocumentClosed(closedId => { if (closedId === id && !destroyed) options.onClose(); }),
       scroll.onScroll(sample), zoom.onZoomChange(sample),
       scrolling.onPageChangeState(({ documentId, state }) => {
-        if (documentId === id && state.isChanging && resizeTimer !== undefined) {
+        if (documentId !== id) return;
+        if (!state.isChanging) {
+          // The last viewport event can precede the end of a smooth page jump.
+          requestAnimationFrame(sample);
+        } else if (resizeTimer !== undefined) {
           acceptUserNavigation();
           lastView = { ...lastView, pageIndex: state.targetPage - 1, pageOffsetRatio: 0 };
         }
