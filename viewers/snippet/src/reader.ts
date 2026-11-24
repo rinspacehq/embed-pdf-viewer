@@ -115,7 +115,10 @@ export async function initReader(options: ReaderOptions): Promise<ReaderHandle> 
     }), manager.onDocumentClosed(closedId => { if (closedId === id && !destroyed) options.onClose(); }),
       scroll.onScroll(sample), zoom.onZoomChange(sample),
       scrolling.onPageChangeState(({ documentId, state }) => {
-        if (documentId === id && state.isChanging && resizeTimer !== undefined) acceptUserNavigation();
+        if (documentId === id && state.isChanging && resizeTimer !== undefined) {
+          acceptUserNavigation();
+          lastView = { ...lastView, pageIndex: state.targetPage - 1, pageOffsetRatio: 0 };
+        }
       }),
       registry.getPlugin<ViewportPlugin>('viewport')!.provides().onViewportResize(event => { if (event.documentId === id) restoreAfterLayout(); })];
     if (options.annotations) {
