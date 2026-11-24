@@ -89,13 +89,13 @@ export function OutlineSidebar({ documentId }: OutlineSidebarProps) {
               y: page.size.height - destination.zoom.params.y,
             }
           : undefined,
-        behavior: 'smooth',
+        behavior: 'instant',
       });
     } else {
       // Handle FitPage, FitH, FitV, FitR, FitB, FitBH, FitBV, etc.
       scroll.scrollToPage({
         pageNumber: destination.pageIndex + 1,
-        behavior: 'smooth',
+        behavior: 'instant',
       });
     }
   };

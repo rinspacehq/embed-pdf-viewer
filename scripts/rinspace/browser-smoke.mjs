@@ -333,36 +333,37 @@ try {
   assert.equal(copy.event?.defaultPrevented, false);
   if (copy.clipboardReadback) assert.equal(copy.clipboardReadback.trim(), 'Original lesson narration.');
   await page.getByRole('button', { name: '第 1 页', exact: true }).last().click();
-  const waitForInputInViewport = () => page.waitForFunction(() => {
-    const panel = Array.from(document.querySelectorAll('embedpdf-container'))
-      .map(element => element.shadowRoot?.querySelector('section[aria-label="琳"]')).find(Boolean);
-    const field = panel?.querySelector('textarea[aria-label="发给琳的消息"]');
-    const box = field?.getBoundingClientRect();
-    return Boolean(box && box.width > 0 && box.height > 0 && box.x >= 0 && box.x + box.width <= innerWidth &&
-      box.y >= 0 && box.y + box.height <= innerHeight);
-  });
-  const layout = async () => {
-    return page.evaluate(() => {
-      const panel = Array.from(document.querySelectorAll('embedpdf-container'))
-        .map(element => element.shadowRoot?.querySelector('section[aria-label="琳"]')).find(Boolean);
-      const box = panel?.querySelector('textarea[aria-label="发给琳的消息"]')?.getBoundingClientRect();
-      return { width: innerWidth, noPageOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-        inputWithinViewport: Boolean(box && box.width > 0 && box.height > 0 && box.x >= 0 && box.right <= innerWidth && box.y >= 0 && box.bottom <= innerHeight) };
+  const settledLayout = async () => {
+    const result = await page.waitForFunction(async () => {
+      const measure = () => {
+        const panel = Array.from(document.querySelectorAll('embedpdf-container'))
+          .map(element => element.shadowRoot?.querySelector('section[aria-label="琳"]')).find(Boolean);
+        const box = panel?.querySelector('textarea[aria-label="发给琳的消息"]')?.getBoundingClientRect();
+        return {
+          width: innerWidth,
+          noPageOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+          inputWithinViewport: Boolean(box && box.width > 0 && box.height > 0 && box.left >= 0 &&
+            box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight),
+        };
+      };
+      const first = measure();
+      if (!first.inputWithinViewport || !first.noPageOverflow) return false;
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const next = measure();
+      return next.inputWithinViewport && next.noPageOverflow && next.width === first.width && next;
     });
+    return result.jsonValue();
   };
-  await waitForInputInViewport();
-  const layouts = [await layout()];
+  const layouts = [await settledLayout()];
   assert.deepEqual(layouts[0], { width: 1440, noPageOverflow: true, inputWithinViewport: true });
   await page.screenshot({ path: resolve(output, 'desktop.png') });
   let zoom200 = null;
   await page.setViewportSize({ width: 768, height: 900 });
-  await waitForInputInViewport();
-  layouts.push(await layout());
+  layouts.push(await settledLayout());
   assert.deepEqual(layouts[1], { width: 768, noPageOverflow: true, inputWithinViewport: true });
   await page.screenshot({ path: resolve(output, 'tablet.png') });
   await page.setViewportSize({ width: 390, height: 844 });
-  await waitForInputInViewport();
-  layouts.push(await layout());
+  layouts.push(await settledLayout());
   assert.deepEqual(layouts[2], { width: 390, noPageOverflow: true, inputWithinViewport: true });
   await page.screenshot({ path: resolve(output, 'mobile.png') });
   await page.getByRole('button', { name: '收起琳', exact: true }).click();

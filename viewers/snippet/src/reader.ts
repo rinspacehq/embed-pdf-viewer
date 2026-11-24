@@ -81,10 +81,11 @@ export async function initReader(options: ReaderOptions): Promise<ReaderHandle> 
     // Native desktop/mobile layouts remount their viewport. Restore after their
     // 150 ms auto-zoom debounce, and don't persist the transient first page.
     const restoreAfterLayout = () => {
-      if (!restored || destroyed) return;
+      if (!restored || destroyed || scroll.getPageChangeState().isChanging) return;
       resizing = true;
       clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
+        resizeTimer = undefined;
         if (destroyed) return;
         const page = manager.getDocument(id)?.pages[lastView.pageIndex];
         if (page) scroll.scrollToPage({ pageNumber: lastView.pageIndex + 1,
@@ -93,9 +94,14 @@ export async function initReader(options: ReaderOptions): Promise<ReaderHandle> 
       }, 250);
     };
     window.addEventListener('resize', restoreAfterLayout);
-    const userScroll = () => { clearTimeout(resizeTimer); resizing = false; ready = true; };
-    viewer.addEventListener('wheel', userScroll, { capture: true, passive: true });
-    viewer.addEventListener('touchmove', userScroll, { capture: true, passive: true });
+    const acceptUserNavigation = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = undefined;
+      resizing = false;
+      ready = true;
+    };
+    viewer.addEventListener('wheel', acceptUserNavigation, { capture: true, passive: true });
+    viewer.addEventListener('touchmove', acceptUserNavigation, { capture: true, passive: true });
     const unsubscribe = [scrolling.onLayoutReady(event => {
       if (event.documentId !== id || restored || destroyed) return;
       restored = true;
@@ -108,13 +114,20 @@ export async function initReader(options: ReaderOptions): Promise<ReaderHandle> 
       options.onReady(pageCount);
     }), manager.onDocumentClosed(closedId => { if (closedId === id && !destroyed) options.onClose(); }),
       scroll.onScroll(sample), zoom.onZoomChange(sample),
+      scrolling.onPageChangeState(({ documentId, state }) => {
+        if (documentId === id && state.isChanging && resizeTimer !== undefined) {
+          acceptUserNavigation();
+          lastView = { ...lastView, pageIndex: state.targetPage - 1, pageOffsetRatio: 0 };
+        }
+      }),
       registry.getPlugin<ViewportPlugin>('viewport')!.provides().onViewportResize(event => { if (event.documentId === id) restoreAfterLayout(); })];
     if (options.annotations) {
       const scope = registry.getPlugin<AnnotationPlugin>('annotation')!.provides().forDocument(id);
       unsubscribe.push(bindReaderAnnotations(scope, options.annotations));
     }
     disposeListeners = () => { destroyed = true; clearTimeout(resizeTimer); window.removeEventListener('resize', restoreAfterLayout);
-      viewer.removeEventListener('wheel', userScroll, true); viewer.removeEventListener('touchmove', userScroll, true);
+      viewer.removeEventListener('wheel', acceptUserNavigation, true);
+      viewer.removeEventListener('touchmove', acceptUserNavigation, true);
       unsubscribe.forEach(stop => stop()); };
     const opened = await (rangeSource
       ? manager.openDocumentUrl({ url: new URL(rangeSource.url, location.href).href,

@@ -2,6 +2,7 @@ import { h, Fragment } from 'preact';
 import { createPortal } from 'preact/compat';
 import { useState, useRef, useCallback, useEffect } from 'preact/hooks';
 import { SidebarRendererProps, useItemRenderer, useUIContainer } from '@embedpdf/plugin-ui/preact';
+import { useTranslations } from '@embedpdf/plugin-i18n/preact';
 import { Icon } from '@/components/ui/icon';
 import { ResizableSidebar, type SidebarResizeOptions } from './resizable-sidebar';
 
@@ -435,6 +436,7 @@ function TabsContent({
   renderCustomComponent: (componentId: string, documentId: string, props: any) => any;
 }) {
   const [activeTab, setActiveTab] = useState(content.tabs[0]?.id || '');
+  const { translate } = useTranslations(documentId);
 
   return (
     <div className="flex h-full flex-1 flex-col">
@@ -444,14 +446,40 @@ function TabsContent({
           const isActive = activeTab === tab.id;
           const isFirst = idx === 0;
           const isLast = idx === array.length - 1;
+          const label = tab.labelKey ? translate(tab.labelKey) : tab.label;
 
           return (
             <button
               key={tab.id}
               role="tab"
+              aria-label={label}
               aria-selected={isActive}
+              title={label}
               tabIndex={isActive ? 0 : -1}
               onClick={() => setActiveTab(tab.id)}
+              onKeyDown={(event) => {
+                let targetIndex: number;
+                switch (event.key) {
+                  case 'ArrowLeft':
+                    targetIndex = isFirst ? array.length - 1 : idx - 1;
+                    break;
+                  case 'ArrowRight':
+                    targetIndex = isLast ? 0 : idx + 1;
+                    break;
+                  case 'Home':
+                    targetIndex = 0;
+                    break;
+                  case 'End':
+                    targetIndex = array.length - 1;
+                    break;
+                  default:
+                    return;
+                }
+                event.preventDefault();
+                setActiveTab(array[targetIndex].id);
+                const tabs = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+                tabs?.[targetIndex]?.focus();
+              }}
               className={`relative flex h-7 flex-1 cursor-pointer items-center justify-center border outline-none transition-colors ${
                 isFirst ? 'rounded-l-md' : ''
               } ${isLast ? 'rounded-r-md' : ''} ${!isLast ? 'border-r-0' : ''} ${
