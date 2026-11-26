@@ -233,13 +233,24 @@ try {
   assert.equal(primaryAfterHover.background, primaryBeforeHover.background);
   assert.equal(primaryAfterHover.color, primaryBeforeHover.color);
   assert.equal(primaryAfterHover.opacity, '0.84');
-  await sendGeneration.click();
+  await input.press('End');
+  await input.press('Shift+Enter');
+  assert.equal(await input.inputValue(), 'Explain a Markdown heading.\n');
+  assert.equal(await page.evaluate(() => typeof window.finishSend), 'undefined');
+  await input.fill('Explain a Markdown heading.');
+  const imeHandled = await input.evaluate(element =>
+    !element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true })));
+  assert.equal(imeHandled, false, 'Enter must remain available to the input method');
+  assert.equal(await page.evaluate(() => typeof window.finishSend), 'undefined');
+  await input.press('Enter');
   await page.waitForFunction(() => typeof window.finishSend === 'function');
   assert.equal(await input.inputValue(), '');
   assert.equal(await page.getByText('Explain a Markdown heading.', { exact: true }).count(), 1);
   await input.fill('Keep this next question as a draft.');
   const stopGeneration = page.getByRole('button', { name: '停止生成', exact: true });
   await stopGeneration.waitFor();
+  await input.press('Enter');
+  assert.equal(await input.inputValue(), 'Keep this next question as a draft.');
   assert.equal((await stopGeneration.textContent()).trim(), '');
   assert.equal(await stopGeneration.locator('svg').count(), 1);
   assert.equal(await page.locator('[data-rin-primary-action]').count(), 1);
