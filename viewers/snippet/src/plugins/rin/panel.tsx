@@ -85,6 +85,8 @@ function RinPanelContent({ documentId, pipSupported, poppedOut, pipError, openPi
   const history = capability.history(documentId);
   const canStartConversation = capability.canStartConversation(documentId);
   const voiceAvailable = capability.voice(documentId)?.available() === true;
+  const submissionDisabled = record.deletionPending || record.recoverable || record.running ||
+    !capability.ready(documentId) || session.status === 'loading' || !record.draft.trim();
   return <section className="flex h-full min-h-0 flex-col text-fg-primary" aria-label="琳">
     <div className="border-border-default flex items-center justify-between border-b p-3 font-semibold"><span>琳</span>
       <div className="flex min-w-0 items-center gap-1">
@@ -133,7 +135,12 @@ function RinPanelContent({ documentId, pipSupported, poppedOut, pipError, openPi
       </div>}
       {pipError && <p role="alert" className="mt-2 text-sm">{pipError}</p>}
     </div></div>
-    <form className="border-border-default border-t p-3" onSubmit={event => { event.preventDefault(); follows.current = true; void capability.send(documentId); }}>
+    <form className="border-border-default border-t p-3" onSubmit={event => {
+      event.preventDefault();
+      if (submissionDisabled) return;
+      follows.current = true;
+      void capability.send(documentId);
+    }}>
       {record.draftAction && <div className="mb-2 flex items-center justify-between text-xs text-fg-secondary">
         <span>{record.draftAction.kind === 'challenge' ? '质疑反馈' : '作答'}</span>
         <Button type="button" aria-label="取消作答模式" onClick={() => capability.selectCheck(documentId)}><Icon icon="x" size={14} /></Button>
@@ -143,7 +150,13 @@ function RinPanelContent({ documentId, pipSupported, poppedOut, pipError, openPi
           第 {region.page} 页区域
           <Button type="button" aria-label={`移除第 ${region.page} 页区域`} disabled={record.running} onClick={() => capability.removeRegion(documentId, region.id)}><Icon icon="x" size={12} /></Button>
         </span>)}</div> : null}
-      <textarea className="border-border-default bg-bg-surface w-full resize-none rounded border p-2 text-sm" rows={3} maxLength={8000} aria-label="发给琳的消息" disabled={record.deletionPending} value={record.draft} onInput={event => capability.draft(documentId, event.currentTarget.value)} />
+      <textarea className="border-border-default bg-bg-surface w-full resize-none rounded border p-2 text-sm" rows={3} maxLength={8000} aria-label="发给琳的消息" disabled={record.deletionPending} value={record.draft} onInput={event => capability.draft(documentId, event.currentTarget.value)}
+        onKeyDown={event => {
+          if (event.defaultPrevented || event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.metaKey ||
+              event.altKey || event.isComposing || event.keyCode === 229) return;
+          event.preventDefault();
+          if (!event.repeat && !submissionDisabled) event.currentTarget.form?.requestSubmit();
+        }} />
       <div className="mt-2 flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
         {capability.canCaptureRegion(documentId) && <Button type="button" aria-label="引用原文区域" tooltip="引用原文区域" disabled={record.running || record.deletionPending}
@@ -152,7 +165,7 @@ function RinPanelContent({ documentId, pipSupported, poppedOut, pipError, openPi
         {record.costSG !== undefined && <details className="text-xs text-fg-secondary"><summary>实扣 {Number(record.costSG.toFixed(6))} 善功</summary>
           {record.usage && <p className="mt-2">输入 {record.usage.inputTokens} token · 输出 {record.usage.outputTokens} token</p>}
         </details>}</div>
-        <div className="flex items-center gap-2"><RinPrimaryAction documentId={documentId} capability={capability} record={record} session={session} /></div>
+        <div className="flex items-center gap-2"><RinPrimaryAction documentId={documentId} capability={capability} record={record} session={session} disabled={submissionDisabled} /></div>
       </div>
     </form>
     <Dialog open={historyOpen} onClose={() => setHistoryOpen(false)} title="对话记录"
@@ -180,16 +193,15 @@ function RinPanelContent({ documentId, pipSupported, poppedOut, pipError, openPi
   </section>;
 }
 
-function RinPrimaryAction({ documentId, capability, record, session }: {
-  documentId: string; capability: RinCapability; record: RinSnapshot; session: RinSession;
+function RinPrimaryAction({ documentId, capability, record, session, disabled }: {
+  documentId: string; capability: RinCapability; record: RinSnapshot; session: RinSession; disabled: boolean;
 }) {
-  const disabled = record.deletionPending || record.recoverable || !capability.ready(documentId) || session.status === 'loading';
   const primaryClass = 'rin-primary-action';
   if (record.running) return <Button data-rin-primary-action="stop" type="button" aria-label="停止生成" tooltip="停止生成"
     className={primaryClass} onClick={() => { void capability.stop(documentId); }}><Icon icon="playerStop" size={18} /></Button>;
-  if (session.status === 'anonymous') return <Button data-rin-primary-action="login" disabled={disabled || !record.draft.trim()} type="submit">登录</Button>;
+  if (session.status === 'anonymous') return <Button data-rin-primary-action="login" disabled={disabled} type="submit">登录</Button>;
   const label = record.draftAction ? record.draftAction.kind === 'challenge' ? '提交质疑' : '提交作答' : '发送';
-  return <Button data-rin-primary-action="send" disabled={disabled || !record.draft.trim()} type="submit" aria-label={label} tooltip={label}
+  return <Button data-rin-primary-action="send" disabled={disabled} type="submit" aria-label={label} tooltip={label}
     className={primaryClass}><Icon icon="arrowUp" size={18} /></Button>;
 }
 
